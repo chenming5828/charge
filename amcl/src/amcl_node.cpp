@@ -72,9 +72,22 @@
 #include <rosbag/view.h>
 #include <boost/foreach.hpp>
 
+#include "amcl/laser.pb.h"
+#include <fstream> 
+
+#include <csm/csm_all.h>   
+#undef min
+#undef max
+
 #define NEW_UNIFORM_SAMPLING 1
+#define MAXITERATIONS (30)
+#define  ERRORMAX   (0.05)
+#define  COVA_XX   (0.02)
+#define  COVA_YY   (0.02)
 
 using namespace amcl;
+using namespace LaserMapData;
+
 
 // Pose hypothesis
 typedef struct
@@ -277,6 +290,24 @@ class AmclNode
     ros::Time last_laser_received_ts_;
     ros::Duration laser_check_interval_;
     void checkLaserReceived(const ros::TimerEvent& event);
+
+    LaserRaw recordData_;
+    double base_to_laser_[3];
+    sm_params input_;
+    sm_result output_;
+    void initIcpParams();
+    void laserScanToLDP(const sensor_msgs::LaserScan::ConstPtr& scan_msg,
+                                            LDP& ldp);
+              
+    void mapToLDP(double ox, double oy,double yaw, const sensor_msgs::LaserScan::ConstPtr& scan_msg, LDP& ldp);
+    void baseToLaser(double& bx, double& by, double& ba, double& ox, double& oy, double& oa);
+    double mapHitRange(double ox,double oy,double oa, double max_range);
+    int getIndexX(double x);
+    int getIndexY(double y);
+    bool validInMap(int i, int j);
+    void createTfFromXYTheta(double x, double y, double theta, tf2::Transform& t);
+    
+
 };
 
 std::vector<std::pair<int,int> > AmclNode::free_space_indices;
@@ -469,6 +500,86 @@ AmclNode::AmclNode() :
   laser_check_interval_ = ros::Duration(15.0);
   check_laser_timer_ = nh_.createTimer(laser_check_interval_, 
                                        boost::bind(&AmclNode::checkLaserReceived, this, _1));
+  
+
+  initIcpParams();
+
+  
+  std::fstream input("/home/sam/laser.pbstream", std::fstream::in | std::fstream::binary);
+  recordData_.ParseFromIstream(&input);
+  input.close();
+ 
+  std::cout << recordData_.points_size()<< " size " << std::endl;
+
+}
+
+void AmclNode::initIcpParams()
+{
+    input_.laser[0] = 0.0;
+    input_.laser[1] = 0.0;
+    input_.laser[2] = 0.0;
+ 
+    input_.first_guess[0] = 0;
+    input_.first_guess[1] = 0;
+    input_.first_guess[2] = 0;
+ 
+ 
+ 
+    output_.cov_x_m = 0;
+    output_.dx_dy1_m = 0;
+    output_.dx_dy2_m = 0;
+ 
+  
+    input_.max_angular_correction_deg = 90.0;
+    input_.max_linear_correction = 2.80;
+    
+    input_.max_correspondence_dist = 4.0;
+ 
+    input_.max_iterations = MAXITERATIONS;
+    input_.epsilon_xy = 0.0001;
+    input_.epsilon_theta = 0.0001;
+    
+ 
+ 
+    input_.sigma = 0.010;
+ 
+     input_.use_corr_tricks = 1;
+ 
+    input_.restart = 0;
+ 
+    input_.restart_threshold_mean_error = 0.01;
+ 
+    input_.restart_dt = 1.0;
+ 
+    input_.restart_dtheta = 0.1;
+ 
+    input_.clustering_threshold = 0.25;
+  
+    input_.orientation_neighbourhood = 20;
+    input_.use_point_to_line_distance = 1;
+ 
+ 
+    input_.do_alpha_test = 0;
+ 
+    input_.do_alpha_test_thresholdDeg = 20.0;
+  
+    input_.outliers_maxPerc = 0.90;
+  
+    input_.outliers_adaptive_order = 0.7;
+    input_.outliers_adaptive_mult = 2.0;
+ 
+    input_.do_visibility_test = 0;
+  
+    input_.outliers_remove_doubles = 1;
+  
+    input_.do_compute_covariance = 0;
+  
+    input_.debug_verify_tricks = 0;
+ 
+  
+    input_.use_ml_weights = 0;
+ 
+    input_.use_sigma_weights = 0;
 }
 
 void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
@@ -1107,6 +1218,11 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     // laser mounting angle gets computed later -> set to 0 here!
     laser_pose_v.v[2] = 0;
     lasers_[laser_index]->SetLaserPose(laser_pose_v);
+
+    base_to_laser_[0] = laser_pose_v.v[0];
+    base_to_laser_[1] = laser_pose_v.v[1];
+    base_to_laser_[2] = laser_pose_v.v[2];
+
     ROS_DEBUG("Received laser's pose wrt robot: %.3f %.3f %.3f",
               laser_pose_v.v[0],
               laser_pose_v.v[1],
@@ -1325,6 +1441,8 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 
     if(max_weight > 0.0)
     {
+
+
       ROS_DEBUG("Max weight pose: %.3f %.3f %.3f",
                 hyps[max_weight_hyp].pf_pose_mean.v[0],
                 hyps[max_weight_hyp].pf_pose_mean.v[1],
@@ -1377,6 +1495,52 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       pose_pub_.publish(p);
       last_published_pose = p;
 
+      double cov_xx =  p.pose.covariance[0];
+      double cov_yy =  p.pose.covariance[7];
+      bool do_icp = false;
+      LDP scan_cur;
+      LDP scan_ref;
+      if(cov_xx < COVA_XX && cov_yy < COVA_YY)
+      {
+          do_icp = true;
+ 
+          laserScanToLDP(laser_scan,scan_cur);
+          mapToLDP(hyps[max_weight_hyp].pf_pose_mean.v[0],
+                    hyps[max_weight_hyp].pf_pose_mean.v[1],
+                    hyps[max_weight_hyp].pf_pose_mean.v[2],
+                    laser_scan,scan_ref);
+          
+          input_.laser_ref  = scan_ref;
+          input_.laser_sens = scan_cur;
+    
+    
+          input_.min_reading = laser_scan->range_min;
+          input_.max_reading = laser_scan->range_max;
+    
+          // If they are non-Null, free covariance gsl matrices to avoid leaking memory
+          if (output_.cov_x_m)
+          {
+            gsl_matrix_free(output_.cov_x_m);
+            output_.cov_x_m = 0;
+          }
+          if (output_.dx_dy1_m)
+          {
+            gsl_matrix_free(output_.dx_dy1_m);
+            output_.dx_dy1_m = 0;
+          }
+          if (output_.dx_dy2_m)
+          {
+            gsl_matrix_free(output_.dx_dy2_m);
+            output_.dx_dy2_m = 0;
+          }
+                  
+          sm_icp(&input_, &output_);
+
+      }
+
+ 
+
+
       ROS_DEBUG("New pose: %6.3f %6.3f %6.3f",
                hyps[max_weight_hyp].pf_pose_mean.v[0],
                hyps[max_weight_hyp].pf_pose_mean.v[1],
@@ -1386,18 +1550,48 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       geometry_msgs::PoseStamped odom_to_map;
       try
       {
-        tf2::Quaternion q;
-        q.setRPY(0, 0, hyps[max_weight_hyp].pf_pose_mean.v[2]);
-        tf2::Transform tmp_tf(q, tf2::Vector3(hyps[max_weight_hyp].pf_pose_mean.v[0],
-                                              hyps[max_weight_hyp].pf_pose_mean.v[1],
-                                              0.0));
+        if(do_icp && output_.valid && (output_.error/output_.nvalid) < ERRORMAX )
+        {
+          std::cout << "get improve pose" << std::endl;
+          tf2::Transform corr_ch_l;
+          tf2::Transform map_to_base;
+          tf2::Transform base_to_laser_tmp;
 
-        geometry_msgs::PoseStamped tmp_tf_stamped;
-        tmp_tf_stamped.header.frame_id = base_frame_id_;
-        tmp_tf_stamped.header.stamp = laser_scan->header.stamp;
-        tf2::toMsg(tmp_tf.inverse(), tmp_tf_stamped.pose);
+          createTfFromXYTheta(base_to_laser_[0], base_to_laser_[1], base_to_laser_[2], base_to_laser_tmp);
+ 
+          createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
+          
+          createTfFromXYTheta(hyps[max_weight_hyp].pf_pose_mean.v[0], hyps[max_weight_hyp].pf_pose_mean.v[1], 
+                              hyps[max_weight_hyp].pf_pose_mean.v[2], map_to_base);
+ 
+          tf2::Transform f2m = map_to_base * base_to_laser_tmp * corr_ch_l * base_to_laser_tmp.inverse();
 
-        this->tf_->transform(tmp_tf_stamped, odom_to_map, odom_frame_id_);
+          geometry_msgs::PoseStamped tmp_tf_stamped;
+          tmp_tf_stamped.header.frame_id = base_frame_id_;
+          tmp_tf_stamped.header.stamp = laser_scan->header.stamp;
+          tf2::toMsg(f2m.inverse(), tmp_tf_stamped.pose);
+          
+
+          this->tf_->transform(tmp_tf_stamped, odom_to_map, odom_frame_id_);
+
+        }
+        else
+        {
+          tf2::Quaternion q;
+          q.setRPY(0, 0, hyps[max_weight_hyp].pf_pose_mean.v[2]);
+          tf2::Transform tmp_tf(q, tf2::Vector3(hyps[max_weight_hyp].pf_pose_mean.v[0],
+                                                hyps[max_weight_hyp].pf_pose_mean.v[1],
+                                                0.0));
+
+          geometry_msgs::PoseStamped tmp_tf_stamped;
+          tmp_tf_stamped.header.frame_id = base_frame_id_;
+          tmp_tf_stamped.header.stamp = laser_scan->header.stamp;
+          tf2::toMsg(tmp_tf.inverse(), tmp_tf_stamped.pose);
+          std::cout <<"frame id:  "<< base_frame_id_  << std::endl;
+          this->tf_->transform(tmp_tf_stamped, odom_to_map, odom_frame_id_);
+        }
+
+ 
       }
       catch(tf2::TransformException)
       {
@@ -1423,6 +1617,13 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
         this->tfb_->sendTransform(tmp_tf_stamped);
         sent_first_transform_ = true;
       }
+      
+      if(do_icp)
+      {
+            ld_free(scan_cur);
+            ld_free(scan_ref);
+      }
+
     }
     else
     {
@@ -1455,6 +1656,256 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     }
   }
 
+}
+
+void AmclNode::laserScanToLDP(const sensor_msgs::LaserScan::ConstPtr& scan_msg,
+                                            LDP& ldp)
+{
+  unsigned int n = scan_msg->ranges.size();
+  ldp = ld_alloc_new(n);
+ 
+  
+  for (unsigned int i = 0; i < n; i++)
+  {
+  
+ 
+    double r = scan_msg->ranges[i];
+ 
+    if (r > scan_msg->range_min && r < scan_msg->range_max)
+    {
+      
+ 
+      ldp->valid[i] = 1;
+      ldp->readings[i] = r;
+    }
+    else
+    {
+      ldp->valid[i] = 0;
+      ldp->readings[i] = -1;  // for invalid range
+    }
+    
+    ldp->theta[i]    = scan_msg->angle_min + i * scan_msg->angle_increment;
+ 
+    ldp->cluster[i]  = -1;
+  }
+  
+  ldp->min_theta = ldp->theta[0];
+  ldp->max_theta = ldp->theta[n-1];
+ 
+  ldp->odometry[0] = 0.0;
+  ldp->odometry[1] = 0.0;
+  ldp->odometry[2] = 0.0;
+ 
+  ldp->true_pose[0] = 0.0;
+  ldp->true_pose[1] = 0.0;
+  ldp->true_pose[2] = 0.0;
+}
+
+
+int AmclNode::getIndexX(double x)
+{
+ 
+  double scale = recordData_.scale();
+  double origin_x = recordData_.origin_x();
+  int index = floor( (x - origin_x) / scale );
+ 
+  return index;
+}
+ 
+int AmclNode::getIndexY(double y)
+{
+  
+  double scale = recordData_.scale();
+  double origin_y = recordData_.origin_y();
+ 
+  int index = floor( (y - origin_y) / scale );
+  return index;
+}
+
+bool AmclNode::validInMap(int i, int j)
+{
+  int height = recordData_.height();
+  int width = recordData_.width();
+  return ( (i >= 0) && (i < width) && (j >= 0) && (j < height));
+}
+
+// hit unknow return -1
+// only hit occ return norm
+double AmclNode::mapHitRange(double ox,double oy,double oa, double max_range)
+{
+  
+  int x0,x1,y0,y1;
+  int x,y;
+  int xstep, ystep;
+  char steep;
+  int tmp;
+  int deltax, deltay, error, deltaerr;
+ 
+ 
+  int width = recordData_.width();
+ 
+  //起点
+  x0 = getIndexX(ox);
+  y0 = getIndexY(oy);
+  //  std::cout << x0 << " : " << y0 << std::endl;
+ 
+  //终点
+  x1 = getIndexX(ox + max_range * cos(oa));
+  y1 = getIndexY(oy + max_range * sin(oa));
+ 
+  if(abs(y1-y0) > abs(x1-x0))
+    steep = 1;
+  else
+    steep = 0;
+ 
+  if(steep)
+  {
+    // x y对换
+    tmp = x0;
+    x0 = y0;
+    y0 = tmp;
+ 
+    tmp = x1;
+    x1 = y1;
+    y1 = tmp;
+  }
+ 
+  deltax = abs(x1-x0);
+  deltay = abs(y1-y0);
+  error = 0;
+  deltaerr = deltay;
+ 
+  x = x0;
+  y = y0;
+ 
+  if(x0 < x1)
+    xstep = 1;
+  else
+    xstep = -1;
+  if(y0 < y1)
+    ystep = 1;
+  else
+    ystep = -1;
+// -1 0 100
+ 
+  if(steep)
+  {
+    //unknow or invalid
+    int occ = recordData_.points(y + x * width).occ() ;
+    double px = recordData_.points(y + x * width).p_x();
+    double py = recordData_.points(y + x * width).p_y();
+    if(!validInMap(y,x) || occ < 0)
+    {
+      return (-1.0);
+    }
+    if(occ == 100)
+    {
+      return sqrt((px-ox)*(px-ox) + (py-oy)*(py-oy));
+    }
+      
+  }
+  else
+  {
+    int occ = recordData_.points(x + y * width).occ() ;
+    double px = recordData_.points(x + y * width).p_x();
+    double py = recordData_.points(x + y * width).p_y();
+ 
+    if(!validInMap(x,y) || occ < 0)
+    {
+      return (-1.0);
+    }
+    if(occ == 100)
+    {
+      return sqrt((px-ox)*(px-ox) + (py-oy)*(py-oy));
+    }
+      
+  }
+ 
+  while(x != (x1 + xstep * 1))
+  {
+    x += xstep;
+    error += deltaerr;
+    // 贴着射线进行遍历
+    if(2*error >= deltax)
+    {
+      y += ystep;
+      error -= deltax;
+    }
+ 
+    if(steep)
+    {
+      int occ = recordData_.points(y + x * width).occ() ;
+      double px = recordData_.points(y + x * width).p_x();
+      double py = recordData_.points(y + x * width).p_y();
+      if(!validInMap(y,x) || occ < 0)
+      {
+        return (-1.0);
+      }
+      if(occ == 100)
+      {
+        return sqrt((px-ox)*(px-ox) + (py-oy)*(py-oy));
+      }
+    }
+    else
+    {
+      int occ = recordData_.points(x + y * width).occ() ;
+      double px = recordData_.points(x + y * width).p_x();
+      double py = recordData_.points(x + y * width).p_y();
+ 
+      if(!validInMap(x,y) || occ < 0)
+      {
+        return (-1.0);
+      }
+      if(occ == 100)
+      {
+        return sqrt((px-ox)*(px-ox) + (py-oy)*(py-oy));
+      }
+    }
+  }
+  return (-1.0);
+}
+
+void AmclNode::mapToLDP(double ox, double oy,double yaw, const sensor_msgs::LaserScan::ConstPtr& scan_msg, LDP& ldp)
+{
+  double laser_x,laser_y,laser_yaw;
+  baseToLaser(ox, oy, yaw, laser_x, laser_y, laser_yaw);
+
+  unsigned int n = scan_msg->ranges.size();
+  ldp = ld_alloc_new(n);
+ 
+  for(int i = 0; i < n; ++i)
+  {
+      double beam_angle = laser_yaw + scan_msg->angle_min + i * scan_msg->angle_increment;
+      beam_angle = normalize(beam_angle);
+
+      double range = mapHitRange(laser_x, laser_y, beam_angle, scan_msg->range_max);
+      ldp->readings[i] = range;
+      ldp->valid[i] = (range < 0)?0:1;
+
+      ldp->theta[i]    = scan_msg->angle_min + i * scan_msg->angle_increment;
+      ldp->cluster[i]  = -1;
+
+  }
+ 
+   ldp->min_theta = ldp->theta[0];
+   ldp->max_theta = ldp->theta[n-1];
+ 
+   ldp->odometry[0] = 0.0;
+   ldp->odometry[1] = 0.0;
+   ldp->odometry[2] = 0.0;
+ 
+   ldp->true_pose[0] = 0.0;
+   ldp->true_pose[1] = 0.0;
+   ldp->true_pose[2] = 0.0;
+
+}
+
+void AmclNode::baseToLaser(double& bx, double& by, double& ba, double& ox, double& oy, double& oa)
+{
+    ox = bx + base_to_laser_[0] * cos(ba) - base_to_laser_[1] * sin(ba);
+    oy = by + base_to_laser_[0] * sin(ba) + base_to_laser_[1] * cos(ba);
+    oa = ba + base_to_laser_[2];
+    oa = atan2(sin(oa), cos(oa));
 }
 
 void
@@ -1555,4 +2006,13 @@ AmclNode::applyInitialPose()
     delete initial_pose_hyp_;
     initial_pose_hyp_ = NULL;
   }
+}
+
+void AmclNode::createTfFromXYTheta(
+  double x, double y, double theta, tf2::Transform& t)
+{
+  t.setOrigin(tf2::Vector3(x, y, 0.0));
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, theta);
+  t.setRotation(q);
 }

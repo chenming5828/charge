@@ -23,7 +23,7 @@ ros::Publisher pose_pub_;
 
 void odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg)
 {
-    std::cout << "get odom" << std::endl;
+    // std::cout << "get odom" << std::endl;
     geometry_msgs::PoseStamped odom_pose;
     odom_pose.header = odom_msg->header;
     odom_pose.pose = odom_msg->pose.pose;
@@ -33,10 +33,10 @@ void odomCallback(const nav_msgs::Odometry::ConstPtr& odom_msg)
     {
         tf_->transform(odom_pose, map_pose, "map");
         
-        ROS_ERROR("point of MAP in frame Position(x:%f y:%f z:%f)\n", 
-            map_pose.pose.position.x,
-            map_pose.pose.position.y,
-            map_pose.pose.position.z);
+        // ROS_ERROR("point of MAP in frame Position(x:%f y:%f z:%f)\n", 
+        //     map_pose.pose.position.x,
+        //     map_pose.pose.position.y,
+        //     map_pose.pose.position.z);
 
         pose_pub_.publish(map_pose);
 
