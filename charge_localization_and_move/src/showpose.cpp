@@ -22,6 +22,7 @@ int main (int argc, char **argv)
     ros::init (argc, argv, "show_trajectory");
 
     ros::NodeHandle ph;
+    std::cout << "showpose node up " << std::endl;
 
     ros::Publisher path_pub_improve = ph.advertise<nav_msgs::Path>("trajectory_icp",2, true);
 

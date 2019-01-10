@@ -531,8 +531,8 @@ void AmclNode::initIcpParams()
     output_.dx_dy2_m = 0;
  
   
-    input_.max_angular_correction_deg = 90.0;
-    input_.max_linear_correction = 2.80;
+    input_.max_angular_correction_deg = 45.0;
+    input_.max_linear_correction = 0.15;
     
     input_.max_correspondence_dist = 4.0;
  
@@ -1554,7 +1554,8 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       {
         if(do_icp && output_.valid && (output_.error/output_.nvalid) < ERRORMAX )
         {
-          std::cout << "use improve pose" << std::endl;
+          std::cout << "use improve pose,offset :   " 
+            << output_.x[0] << "  "<< output_.x[1]<< "  "<<output_.x[2]<< std::endl;
           tf2::Transform corr_ch_l;
           tf2::Transform map_to_base;
           tf2::Transform base_to_laser_tmp;

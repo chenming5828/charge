@@ -121,6 +121,7 @@
 
   <node pkg="charge_localization_and_move" type="odom2map" name="odom2map" output="screen" />
   <node pkg="charge_localization_and_move" type="showpose" name="showpose" output="screen" />
+  <node pkg="charge_localization_and_move" type="showlaser" name="showlaser" output="screen" />
 
  
 

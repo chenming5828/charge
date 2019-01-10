@@ -62,6 +62,12 @@ target_link_libraries(showpose
     ${catkin_LIBRARIES}
 )
 
+add_executable(showlaser src/showlaser.cpp  )
+target_link_libraries(showlaser
+    ${Boost_LIBRARIES}
+    ${catkin_LIBRARIES}
+)
+
 
 # ADD_LIBRARY(icp_precise src/icp_pose.cpp)
 

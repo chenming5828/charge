@@ -64,7 +64,7 @@ int main(int argc, char** argv)
   ros::init(argc, argv, "odom2map");
   ros::NodeHandle nh;
 
-  std::cout << "ros init " << std::endl;
+  std::cout << "  odom2map node up  " << std::endl;
 
    
     tf_.reset(new tf2_ros::Buffer());
