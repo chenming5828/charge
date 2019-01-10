@@ -56,6 +56,12 @@ target_link_libraries(odom2map
     ${catkin_LIBRARIES}
 )
 
+add_executable(showpose src/showpose.cpp  )
+target_link_libraries(showpose
+    ${Boost_LIBRARIES}
+    ${catkin_LIBRARIES}
+)
+
 
 # ADD_LIBRARY(icp_precise src/icp_pose.cpp)
 
