@@ -80,6 +80,7 @@
 #undef max
 
 #define NEW_UNIFORM_SAMPLING 1
+
 #define MAXITERATIONS (30)
 #define  ERRORMAX   (0.05)
 #define  COVA_XX   (0.02)
@@ -1535,6 +1536,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
           }
                   
           sm_icp(&input_, &output_);
+          std::cout << output_.valid << " : "<< output_.error << " : "<< output_.nvalid << " : "<<(output_.error/output_.nvalid)<< std::endl;
 
       }
 
@@ -1552,7 +1554,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       {
         if(do_icp && output_.valid && (output_.error/output_.nvalid) < ERRORMAX )
         {
-          std::cout << "get improve pose" << std::endl;
+          std::cout << "use improve pose" << std::endl;
           tf2::Transform corr_ch_l;
           tf2::Transform map_to_base;
           tf2::Transform base_to_laser_tmp;
@@ -1577,6 +1579,8 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
         }
         else
         {
+          std::cout << "use amcl pose" << std::endl;
+
           tf2::Quaternion q;
           q.setRPY(0, 0, hyps[max_weight_hyp].pf_pose_mean.v[2]);
           tf2::Transform tmp_tf(q, tf2::Vector3(hyps[max_weight_hyp].pf_pose_mean.v[0],
@@ -1587,7 +1591,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
           tmp_tf_stamped.header.frame_id = base_frame_id_;
           tmp_tf_stamped.header.stamp = laser_scan->header.stamp;
           tf2::toMsg(tmp_tf.inverse(), tmp_tf_stamped.pose);
-          std::cout <<"frame id:  "<< base_frame_id_  << std::endl;
+          // std::cout <<"frame id:  "<< base_frame_id_  << std::endl;
           this->tf_->transform(tmp_tf_stamped, odom_to_map, odom_frame_id_);
         }
 
@@ -1617,7 +1621,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
         this->tfb_->sendTransform(tmp_tf_stamped);
         sent_first_transform_ = true;
       }
-      
+
       if(do_icp)
       {
             ld_free(scan_cur);
