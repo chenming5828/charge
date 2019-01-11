@@ -81,10 +81,10 @@
 
 #define NEW_UNIFORM_SAMPLING 1
 
-#define MAXITERATIONS (30)
+#define  MAXITERATIONS (30)
 #define  ERRORMAX   (0.05)
-#define  COVA_XX   (0.02)
-#define  COVA_YY   (0.02)
+#define  COVA_XX   (0.03)
+#define  COVA_YY   (0.03)
 
 using namespace amcl;
 using namespace LaserMapData;
@@ -1372,7 +1372,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       ldata.ranges[i][1] = angle_min +
               (i * angle_increment);
     }
-
+    // 计算所有粒子的权重，归一化过了
     lasers_[laser_index]->UpdateSensor(pf_, (AMCLSensorData*)&ldata);
 
     lasers_update_[laser_index] = false;
@@ -1501,10 +1501,15 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       bool do_icp = false;
       LDP scan_cur;
       LDP scan_ref;
+     
+
+      // std::cout << "pf converged -----" << pf_update_converged(pf_) << std::endl;
+      // if(pf_update_converged(pf_))
       if(cov_xx < COVA_XX && cov_yy < COVA_YY)
       {
           do_icp = true;
- 
+
+  
           laserScanToLDP(laser_scan,scan_cur);
           mapToLDP(hyps[max_weight_hyp].pf_pose_mean.v[0],
                     hyps[max_weight_hyp].pf_pose_mean.v[1],

@@ -190,6 +190,9 @@ int pf_update_converged(pf_t *pf);
 //sets the current set and pf converged values to zero
 void pf_init_converged(pf_t *pf);
 
+// Set a particular pose 
+int pf_set_sample_stats(pf_t *pf, int cluster, pf_vector_t *mean);
+
 #ifdef __cplusplus
 }
 #endif

@@ -35,6 +35,7 @@
 #include "amcl/pf/pf_kdtree.h"
 
 
+
 // Compute the required number of samples, given that there are k bins
 // with samples in them.
 static int pf_resample_limit(pf_t *pf, int k);
@@ -234,6 +235,7 @@ int pf_update_converged(pf_t *pf)
     sample = set->samples + i;
     if(fabs(sample->pose.v[0] - mean_x) > pf->dist_threshold || 
        fabs(sample->pose.v[1] - mean_y) > pf->dist_threshold){
+        // printf("not conv %d,(%f,%f), (%f,%f) \n",i ,mean_x,mean_y,sample->pose.v[0],sample->pose.v[1]);
       set->converged = 0; 
       pf->converged = 0; 
       return 0;
@@ -469,6 +471,8 @@ int pf_resample_limit(pf_t *pf, int k)
 }
 
 
+
+
 // Re-compute the cluster statistics for a sample set
 void pf_cluster_stats(pf_t *pf, pf_sample_set_t *set)
 {
@@ -656,5 +660,20 @@ int pf_get_cluster_stats(pf_t *pf, int clabel, double *weight,
 
   return 1;
 }
+
+int pf_set_sample_stats(pf_t *pf, int clabel, pf_vector_t *mean)
+{
+  // pf_sample_set_t *set;
+  // pf_cluster_t *cluster;
+
+  // set = pf->sets + pf->current_set;
+
+  // if (clabel >= set->cluster_count)
+  //   return 0;
+  // cluster = set->clusters + clabel;
+  return 0;
+
+}
+
 
 
