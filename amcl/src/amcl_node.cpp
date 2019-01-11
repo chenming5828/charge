@@ -531,7 +531,7 @@ void AmclNode::initIcpParams()
     output_.dx_dy2_m = 0;
  
   
-    input_.max_angular_correction_deg = 45.0;
+    input_.max_angular_correction_deg = 60.0;
     input_.max_linear_correction = 0.15;
     
     input_.max_correspondence_dist = 4.0;
