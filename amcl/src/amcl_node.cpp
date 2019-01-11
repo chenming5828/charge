@@ -1307,6 +1307,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 
   bool resampled = false;
   // If the robot has moved, update the filter
+ 
   if(lasers_update_[laser_index])
   {
     AMCLLaserData ldata;
@@ -1375,6 +1376,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     // 计算所有粒子的权重，归一化过了
     lasers_[laser_index]->UpdateSensor(pf_, (AMCLSensorData*)&ldata);
 
+
     lasers_update_[laser_index] = false;
 
     pf_odom_pose_ = pose;
@@ -1387,7 +1389,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     }
 
     pf_sample_set_t* set = pf_->sets + pf_->current_set;
-    ROS_DEBUG("Num samples: %d\n", set->sample_count);
+    // ROS_ERROR("--Num samples: %d\n", set->sample_count);
 
     // Publish the resulting cloud
     // TODO: set maximum rate for publishing
@@ -1417,9 +1419,17 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     int max_weight_hyp = -1;
     std::vector<amcl_hyp_t> hyps;
     hyps.resize(pf_->sets[pf_->current_set].cluster_count);
+
+    double max_weight_icp = 0.0;
+    int max_weight_hyp_icp = -1;
+    std::vector<amcl_hyp_t> hyps_icp;
+    
+
+
     for(int hyp_count = 0;
         hyp_count < pf_->sets[pf_->current_set].cluster_count; hyp_count++)
     {
+      // std::cout << "has cluster numbers :  "<< pf_->sets[pf_->current_set].cluster_count << std::endl;
       double weight;
       pf_vector_t pose_mean;
       pf_matrix_t pose_cov;
@@ -1438,6 +1448,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
         max_weight = hyps[hyp_count].weight;
         max_weight_hyp = hyp_count;
       }
+      // std::cout << "has cluster numbers :  "<< pf_->sets[pf_->current_set].cluster_count << " : " << hyps[hyp_count].weight << std::endl;
     }
 
     if(max_weight > 0.0)
@@ -1499,12 +1510,11 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       double cov_xx =  p.pose.covariance[0];
       double cov_yy =  p.pose.covariance[7];
       bool do_icp = false;
+      bool get_icp_weight = false;
       LDP scan_cur;
       LDP scan_ref;
      
 
-      // std::cout << "pf converged -----" << pf_update_converged(pf_) << std::endl;
-      // if(pf_update_converged(pf_))
       if(cov_xx < COVA_XX && cov_yy < COVA_YY)
       {
           do_icp = true;
@@ -1543,6 +1553,142 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
           sm_icp(&input_, &output_);
           std::cout << output_.valid << " : "<< output_.error << " : "<< output_.nvalid << " : "<<(output_.error/output_.nvalid)<< std::endl;
 
+          // 将误差值用于运动状态转换
+          if(output_.valid && (output_.error/output_.nvalid) < ERRORMAX )
+          {
+
+              // 修正所有粒子的误差
+              tf2::Transform corr_ch_l;
+              tf2::Transform base_to_laser_tmp;
+              createTfFromXYTheta(base_to_laser_[0], base_to_laser_[1], base_to_laser_[2], base_to_laser_tmp);
+              createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
+
+              pf_sample_set_t* pf_sets = pf_->sets + pf_->current_set;
+
+              for(int i=0;i<pf_sets->sample_count;i++)
+              {
+                  tf2::Transform sample_base;
+                  createTfFromXYTheta(pf_sets->samples[i].pose.v[0],
+                      pf_sets->samples[i].pose.v[1], 
+                      pf_sets->samples[i].pose.v[2], 
+                      sample_base);
+                  tf2::Transform sample_predict = sample_base * base_to_laser_tmp * corr_ch_l * base_to_laser_tmp.inverse();
+                  geometry_msgs::Pose  tmp_pose;
+                  tf2::toMsg(sample_predict, tmp_pose);
+
+                  pf_sets->samples[i].pose.v[0] = tmp_pose.position.x;
+                  pf_sets->samples[i].pose.v[1] = tmp_pose.position.y;
+                  pf_sets->samples[i].pose.v[2] = tf2::getYaw(tmp_pose.orientation);
+
+              }
+
+              // 观测更新
+              {
+
+                  AMCLLaserData ldata_copy;
+                  ldata_copy.sensor = lasers_[laser_index];
+                  ldata_copy.range_count = laser_scan->ranges.size();
+
+                  tf2::Quaternion q;
+                  q.setRPY(0.0, 0.0, laser_scan->angle_min);
+                  geometry_msgs::QuaternionStamped min_q, inc_q;
+                  min_q.header.stamp = laser_scan->header.stamp;
+                  min_q.header.frame_id = stripSlash(laser_scan->header.frame_id);
+                  tf2::convert(q, min_q.quaternion);
+
+                  q.setRPY(0.0, 0.0, laser_scan->angle_min + laser_scan->angle_increment);
+                  inc_q.header = min_q.header;
+                  tf2::convert(q, inc_q.quaternion);
+                  try
+                  {
+                    tf_->transform(min_q, min_q, base_frame_id_);
+                    tf_->transform(inc_q, inc_q, base_frame_id_);
+                  }
+                  catch(tf2::TransformException& e)
+                  {
+                    ROS_WARN("Unable to transform min/max laser angles into base frame: %s",
+                            e.what());
+                    return;
+                  }
+
+                  double angle_min = tf2::getYaw(min_q.quaternion);
+                  double angle_increment = tf2::getYaw(inc_q.quaternion) - angle_min;
+
+                  // wrapping angle to [-pi .. pi]
+                  angle_increment = fmod(angle_increment + 5*M_PI, 2*M_PI) - M_PI;
+
+                  ROS_DEBUG("Laser %d angles in base frame: min: %.3f inc: %.3f", laser_index, angle_min, angle_increment);
+
+                  // Apply range min/max thresholds, if the user supplied them
+                  if(laser_max_range_ > 0.0)
+                    ldata_copy.range_max = std::min(laser_scan->range_max, (float)laser_max_range_);
+                  else
+                    ldata_copy.range_max = laser_scan->range_max;
+                  double range_min;
+                  if(laser_min_range_ > 0.0)
+                    range_min = std::max(laser_scan->range_min, (float)laser_min_range_);
+                  else
+                    range_min = laser_scan->range_min;
+                  // The AMCLLaserData destructor will free this memory
+                  ldata_copy.ranges = new double[ldata_copy.range_count][2];
+                  ROS_ASSERT(ldata_copy.ranges);
+                  for(int i=0;i<ldata_copy.range_count;i++)
+                  {
+                    // amcl doesn't (yet) have a concept of min range.  So we'll map short
+                    // readings to max range.
+                    if(laser_scan->ranges[i] <= range_min)
+                      ldata_copy.ranges[i][0] = ldata_copy.range_max;
+                    else
+                      ldata_copy.ranges[i][0] = laser_scan->ranges[i];
+                    // Compute bearing
+                    ldata_copy.ranges[i][1] = angle_min +
+                            (i * angle_increment);
+                  }
+                  // 计算所有粒子的权重，归一化过了
+                  lasers_[laser_index]->UpdateSensor(pf_, (AMCLSensorData*)&ldata_copy);
+
+              }
+
+              pf_update_resample(pf_);
+              hyps_icp.resize(pf_->sets[pf_->current_set].cluster_count);
+
+              for(int hyp_count = 0;hyp_count < pf_->sets[pf_->current_set].cluster_count; hyp_count++)
+              {
+                // std::cout << "has cluster numbers :  "<< pf_->sets[pf_->current_set].cluster_count << std::endl;
+                double weight;
+                pf_vector_t pose_mean;
+                pf_matrix_t pose_cov;
+                if (!pf_get_cluster_stats(pf_, hyp_count, &weight, &pose_mean, &pose_cov))
+                {
+                  ROS_ERROR("Couldn't get stats on cluster %d", hyp_count);
+                  break;
+                }
+
+                hyps_icp[hyp_count].weight = weight;
+                hyps_icp[hyp_count].pf_pose_mean = pose_mean;
+                hyps_icp[hyp_count].pf_pose_cov = pose_cov;
+
+                if(hyps_icp[hyp_count].weight > max_weight_icp)
+                {
+                  max_weight_icp = hyps_icp[hyp_count].weight;
+                  max_weight_hyp_icp = hyp_count;
+                }
+        
+              }
+              if(max_weight_icp > 0)
+              {
+                get_icp_weight = true;
+              }
+
+
+
+
+
+
+
+
+          }
+          
       }
 
  
@@ -1557,7 +1703,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       geometry_msgs::PoseStamped odom_to_map;
       try
       {
-        if(do_icp && output_.valid && (output_.error/output_.nvalid) < ERRORMAX )
+        if(get_icp_weight)
         {
           std::cout << "use improve pose,offset :   " 
             << output_.x[0] << "  "<< output_.x[1]<< "  "<<output_.x[2]<< std::endl;
@@ -1569,8 +1715,8 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
  
           createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
           
-          createTfFromXYTheta(hyps[max_weight_hyp].pf_pose_mean.v[0], hyps[max_weight_hyp].pf_pose_mean.v[1], 
-                              hyps[max_weight_hyp].pf_pose_mean.v[2], map_to_base);
+          createTfFromXYTheta(hyps_icp[max_weight_hyp].pf_pose_mean.v[0], hyps_icp[max_weight_hyp].pf_pose_mean.v[1], 
+                              hyps_icp[max_weight_hyp].pf_pose_mean.v[2], map_to_base);
  
           tf2::Transform f2m = map_to_base * base_to_laser_tmp * corr_ch_l * base_to_laser_tmp.inverse();
 

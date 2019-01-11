@@ -1,0 +1,8 @@
+<launch>
+  <include file="$(find turtlebot_bringup)/launch/minimal.launch" />
+  <include file="$(find turtlebot_teleop)/launch/myjoystick.launch" />
+ 
+  <node pkg="tf" type="static_transform_publisher" name="base_to_laser" args="-0.13 0.0 0.28 0.0 0.0 0.0 base_link laser 100"/>  
+  <node pkg="tf" type="static_transform_publisher" name="base_to_base_footprint" args="0 0.0 0 0.0 0.0 0.0 base_footprint base_link 100"/>    
+
+</launch>
