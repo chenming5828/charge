@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <iostream>
 
 #include "amcl/sensors/amcl_laser.h"
 
@@ -290,10 +291,15 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
       //      p *= pz;
       // here we have an ad-hoc weighting scheme for combining beam probs
       // works well, though...
-      p += pz*pz*pz;
+      
+
+      p += pz*pz*pz*pz*pz;
+      // std::cout << "one beam " << pz << "   "<< p<< std::endl;
     }
 
     sample->weight *= p;
+    // std::cout << "sample weight " << sample->weight << "  " << p<< std::endl;
+    // std::cout << "============================================== " << std::endl;
     total_weight += sample->weight;
   }
 

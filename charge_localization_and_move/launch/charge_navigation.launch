@@ -4,7 +4,7 @@
  
   <node pkg="tf" type="static_transform_publisher" name="base_to_laser" args="-0.13 0.0 0.28 0.0 0.0 0.0 base_link laser 100"/>   
  
-  <arg name="map_file" default="/home/sam/map/hokuyo_gmapping.yaml"/>
+  <arg name="map_file" default="/home/sam/map/sick_gmapping.yaml"/>
   <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" />
   
  
@@ -34,7 +34,7 @@
   <param name="odom_alpha5" value="0.1"/>
   <param name="transform_tolerance" value="0.2" />
   <param name="gui_publish_rate" value="10.0"/>
-  <param name="laser_max_beams" value="30"/>
+  <param name="laser_max_beams" value="60"/>
   <param name="min_particles" value="500"/>
   <param name="max_particles" value="5000"/>
   <param name="kld_err"       value="0.01"/>

@@ -506,7 +506,7 @@ AmclNode::AmclNode() :
   initIcpParams();
 
   
-  std::fstream input("/home/sam/laser.pbstream", std::fstream::in | std::fstream::binary);
+  std::fstream input("/home/sam/map/sick_gmapping.pbstream", std::fstream::in | std::fstream::binary);
   recordData_.ParseFromIstream(&input);
   input.close();
  
@@ -1503,7 +1503,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       LDP scan_ref;
       if(cov_xx < COVA_XX && cov_yy < COVA_YY)
       {
-          do_icp = true;
+          // do_icp = true;
  
           laserScanToLDP(laser_scan,scan_cur);
           mapToLDP(hyps[max_weight_hyp].pf_pose_mean.v[0],
