@@ -74,6 +74,7 @@
 
 #include "amcl/laser.pb.h"
 #include <fstream> 
+#include "message_filters/time_synchronizer.h"
 
 #include <csm/csm_all.h>   
 #undef min
@@ -307,9 +308,28 @@ class AmclNode
     int getIndexY(double y);
     bool validInMap(int i, int j);
     void createTfFromXYTheta(double x, double y, double theta, tf2::Transform& t);
+
+
+    // message_filters::Subscriber<geometry_msgs::PoseWithCovarianceStamped>* init_pose_sub_;
+    // message_filters::TimeSynchronizer<sensor_msgs::LaserScan, geometry_msgs::PoseWithCovarianceStamped>* initPose_laser_sync_;
+
+    // void laserAndInitposeReceived(const sensor_msgs::LaserScanConstPtr& laser_scan,
+    //                     const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg);
+
+
+   sensor_msgs::LaserScan  lastest_scan_;
+   void icpCalcInitPose(double map_x, double map_y, double map_yaw,const sensor_msgs::LaserScanConstPtr& laser_scan);
+
+
+   
+
+ 
     
 
 };
+
+
+  
 
 std::vector<std::pair<int,int> > AmclNode::free_space_indices;
 
@@ -475,6 +495,10 @@ AmclNode::AmclNode() :
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
 
   laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
+  // init_pose_sub_ = new message_filters::Subscriber<geometry_msgs::PoseWithCovarianceStamped>(nh_, "initialpose", 1);
+  // initPose_laser_sync_ = new message_filters::TimeSynchronizer<sensor_msgs::LaserScan, geometry_msgs::PoseWithCovarianceStamped>(*laser_scan_sub_, *init_pose_sub_, 10);
+  // initPose_laser_sync_->registerCallback(boost::bind(&AmclNode::laserAndInitposeReceived,this, _1, _2));
+
   laser_scan_filter_ = 
           new tf2_ros::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_,
                                                              *tf_,
@@ -513,6 +537,12 @@ AmclNode::AmclNode() :
   std::cout << recordData_.points_size()<< " size " << std::endl;
 
 }
+
+// void AmclNode::laserAndInitposeReceived(const sensor_msgs::LaserScanConstPtr& laser_scan,
+//                         const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg)
+// {
+//     std::cout << "---get  a laser and init pose " << std::endl;
+// }
 
 void AmclNode::initIcpParams()
 {
@@ -1178,6 +1208,7 @@ AmclNode::setMapCallback(nav_msgs::SetMap::Request& req,
 void
 AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 {
+  lastest_scan_ = * laser_scan;
   std::string laser_scan_frame_id = stripSlash(laser_scan->header.frame_id);
   last_laser_received_ts_ = ros::Time::now();
   if( map_ == NULL ) {
@@ -1499,6 +1530,9 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       double cov_xx =  p.pose.covariance[0];
       double cov_yy =  p.pose.covariance[7];
       bool do_icp = false;
+
+ 
+
       LDP scan_cur;
       LDP scan_ref;
       if(cov_xx < COVA_XX && cov_yy < COVA_YY)
@@ -1988,6 +2022,51 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
   }
   pf_init_pose_cov.m[2][2] = msg.pose.covariance[6*5+5];
 
+  std::cout << "get init pose " << std::endl;
+
+  const sensor_msgs::LaserScanConstPtr ssptr(new sensor_msgs::LaserScan(lastest_scan_)) ;
+
+ 
+
+
+  for(int i = 0 ; i < 10; i++)
+  {
+ 
+  icpCalcInitPose(pf_init_pose_mean.v[0], pf_init_pose_mean.v[1], pf_init_pose_mean.v[2], ssptr);
+  std::cout << output_.valid << " : "<< output_.error << " : "<< output_.nvalid << " : "<<(output_.error/output_.nvalid)<< std::endl;
+
+  if(output_.valid && (output_.error/output_.nvalid) < 0.2)   //
+  {
+    std::cout << "get correct pose " << std::endl;
+    // std::cout << output_.valid << " : "<< output_.error << " : "<< output_.nvalid << " : "<<(output_.error/output_.nvalid)<< std::endl;
+
+    tf2::Transform corr_ch_l;
+    tf2::Transform map_to_base;
+    tf2::Transform base_to_laser_tmp;
+
+    createTfFromXYTheta(base_to_laser_[0], base_to_laser_[1], base_to_laser_[2], base_to_laser_tmp);
+
+    createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
+    
+    createTfFromXYTheta(pf_init_pose_mean.v[0],pf_init_pose_mean.v[1], 
+                        pf_init_pose_mean.v[2], map_to_base);
+ 
+    tf2::Transform f2m = map_to_base * base_to_laser_tmp * corr_ch_l * base_to_laser_tmp.inverse();
+
+    geometry_msgs::Pose tmp_pose;
+  
+    tf2::toMsg(f2m, tmp_pose);
+
+    pf_init_pose_mean.v[0] = tmp_pose.position.x;
+    pf_init_pose_mean.v[1] = tmp_pose.position.y;
+    pf_init_pose_mean.v[2] = tf2::getYaw(tmp_pose.orientation);
+          
+
+
+
+  }
+  }
+
   delete initial_pose_hyp_;
   initial_pose_hyp_ = new amcl_hyp_t();
   initial_pose_hyp_->pf_pose_mean = pf_init_pose_mean;
@@ -2020,4 +2099,47 @@ void AmclNode::createTfFromXYTheta(
   tf2::Quaternion q;
   q.setRPY(0.0, 0.0, theta);
   t.setRotation(q);
+}
+
+
+void AmclNode::icpCalcInitPose(double map_x, double map_y, double map_yaw,const sensor_msgs::LaserScanConstPtr& laser_scan)
+{
+    LDP scan_cur;
+    LDP scan_ref;
+    laserScanToLDP(laser_scan,scan_cur);
+    mapToLDP(map_x,map_y,map_yaw,
+            laser_scan,scan_ref);
+
+    input_.laser_ref  = scan_ref;
+    input_.laser_sens = scan_cur;
+
+    input_.max_angular_correction_deg = 90.0;
+    input_.max_linear_correction = 2.5;
+    input_.max_correspondence_dist = 7.0;
+
+
+    input_.min_reading = laser_scan->range_min;
+    input_.max_reading = laser_scan->range_max;
+
+    if (output_.cov_x_m)
+    {
+      gsl_matrix_free(output_.cov_x_m);
+      output_.cov_x_m = 0;
+    }
+    if (output_.dx_dy1_m)
+    {
+      gsl_matrix_free(output_.dx_dy1_m);
+      output_.dx_dy1_m = 0;
+    }
+    if (output_.dx_dy2_m)
+    {
+      gsl_matrix_free(output_.dx_dy2_m);
+      output_.dx_dy2_m = 0;
+    }
+            
+    sm_icp(&input_, &output_);
+
+    ld_free(scan_cur);
+    ld_free(scan_ref);
+
 }
