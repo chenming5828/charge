@@ -1446,56 +1446,40 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     // Read out the current hypotheses
     double max_weight = 0.0;
     int max_weight_hyp = -1;
-    std::vector<amcl_hyp_t> hyps;
-    hyps.resize(pf_->sets[pf_->current_set].cluster_count);
-    for(int hyp_count = 0;
-        hyp_count < pf_->sets[pf_->current_set].cluster_count; hyp_count++)
+    std::vector<pf_sample_t> paticles;
+    paticles.resize(pf_->sets[pf_->current_set].sample_count);
+
+    pf_sample_t *samples =  pf_->sets[pf_->current_set].samples;
+    for(int count =0;count < pf_->sets[pf_->current_set].sample_count;
+          count++)
     {
-      double weight;
-      pf_vector_t pose_mean;
-      pf_matrix_t pose_cov;
-      if (!pf_get_cluster_stats(pf_, hyp_count, &weight, &pose_mean, &pose_cov))
+            
+       paticles[count].weight = samples[count].weight;
+       paticles[count].pose   = samples[count].pose;
+
+      if(paticles[count].weight > max_weight)
       {
-        ROS_ERROR("Couldn't get stats on cluster %d", hyp_count);
-        break;
+        max_weight = paticles[count].weight;
+        max_weight_hyp = count;
       }
 
-      hyps[hyp_count].weight = weight;
-      hyps[hyp_count].pf_pose_mean = pose_mean;
-      hyps[hyp_count].pf_pose_cov = pose_cov;
-
-      if(hyps[hyp_count].weight > max_weight)
-      {
-        max_weight = hyps[hyp_count].weight;
-        max_weight_hyp = hyp_count;
-      }
     }
+
+  
 
     if(max_weight > 0.0)
     {
-
-
-      ROS_DEBUG("Max weight pose: %.3f %.3f %.3f",
-                hyps[max_weight_hyp].pf_pose_mean.v[0],
-                hyps[max_weight_hyp].pf_pose_mean.v[1],
-                hyps[max_weight_hyp].pf_pose_mean.v[2]);
-
-      /*
-         puts("");
-         pf_matrix_fprintf(hyps[max_weight_hyp].pf_pose_cov, stdout, "%6.3f");
-         puts("");
-       */
 
       geometry_msgs::PoseWithCovarianceStamped p;
       // Fill in the header
       p.header.frame_id = global_frame_id_;
       p.header.stamp = laser_scan->header.stamp;
       // Copy in the pose
-      p.pose.pose.position.x = hyps[max_weight_hyp].pf_pose_mean.v[0];
-      p.pose.pose.position.y = hyps[max_weight_hyp].pf_pose_mean.v[1];
+      p.pose.pose.position.x = paticles[max_weight_hyp].pose.v[0];
+      p.pose.pose.position.y = paticles[max_weight_hyp].pose.v[1];
 
       tf2::Quaternion q;
-      q.setRPY(0, 0, hyps[max_weight_hyp].pf_pose_mean.v[2]);
+      q.setRPY(0, 0, paticles[max_weight_hyp].pose.v[2]);
       tf2::convert(q, p.pose.pose.orientation);
       // Copy in the covariance, converting from 3-D to 6-D
       pf_sample_set_t* set = pf_->sets + pf_->current_set;
@@ -1527,99 +1511,18 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       pose_pub_.publish(p);
       last_published_pose = p;
 
-      double cov_xx =  p.pose.covariance[0];
-      double cov_yy =  p.pose.covariance[7];
-      bool do_icp = false;
-
- 
-
-      LDP scan_cur;
-      LDP scan_ref;
-      if(cov_xx < COVA_XX && cov_yy < COVA_YY)
-      {
-          // do_icp = true;
- 
-          laserScanToLDP(laser_scan,scan_cur);
-          mapToLDP(hyps[max_weight_hyp].pf_pose_mean.v[0],
-                    hyps[max_weight_hyp].pf_pose_mean.v[1],
-                    hyps[max_weight_hyp].pf_pose_mean.v[2],
-                    laser_scan,scan_ref);
-          
-          input_.laser_ref  = scan_ref;
-          input_.laser_sens = scan_cur;
     
-    
-          input_.min_reading = laser_scan->range_min;
-          input_.max_reading = laser_scan->range_max;
-    
-          // If they are non-Null, free covariance gsl matrices to avoid leaking memory
-          if (output_.cov_x_m)
-          {
-            gsl_matrix_free(output_.cov_x_m);
-            output_.cov_x_m = 0;
-          }
-          if (output_.dx_dy1_m)
-          {
-            gsl_matrix_free(output_.dx_dy1_m);
-            output_.dx_dy1_m = 0;
-          }
-          if (output_.dx_dy2_m)
-          {
-            gsl_matrix_free(output_.dx_dy2_m);
-            output_.dx_dy2_m = 0;
-          }
-                  
-          sm_icp(&input_, &output_);
-          std::cout << output_.valid << " : "<< output_.error << " : "<< output_.nvalid << " : "<<(output_.error/output_.nvalid)<< std::endl;
 
-      }
-
- 
-
-
-      ROS_DEBUG("New pose: %6.3f %6.3f %6.3f",
-               hyps[max_weight_hyp].pf_pose_mean.v[0],
-               hyps[max_weight_hyp].pf_pose_mean.v[1],
-               hyps[max_weight_hyp].pf_pose_mean.v[2]);
+   
 
       // subtracting base to odom from map to base and send map to odom instead
       geometry_msgs::PoseStamped odom_to_map;
       try
       {
-        if(do_icp && output_.valid && (output_.error/output_.nvalid) < ERRORMAX )
-        {
-          std::cout << "use improve pose,offset :   " 
-            << output_.x[0] << "  "<< output_.x[1]<< "  "<<output_.x[2]<< std::endl;
-          tf2::Transform corr_ch_l;
-          tf2::Transform map_to_base;
-          tf2::Transform base_to_laser_tmp;
-
-          createTfFromXYTheta(base_to_laser_[0], base_to_laser_[1], base_to_laser_[2], base_to_laser_tmp);
- 
-          createTfFromXYTheta(output_.x[0], output_.x[1], output_.x[2], corr_ch_l);
-          
-          createTfFromXYTheta(hyps[max_weight_hyp].pf_pose_mean.v[0], hyps[max_weight_hyp].pf_pose_mean.v[1], 
-                              hyps[max_weight_hyp].pf_pose_mean.v[2], map_to_base);
- 
-          tf2::Transform f2m = map_to_base * base_to_laser_tmp * corr_ch_l * base_to_laser_tmp.inverse();
-
-          geometry_msgs::PoseStamped tmp_tf_stamped;
-          tmp_tf_stamped.header.frame_id = base_frame_id_;
-          tmp_tf_stamped.header.stamp = laser_scan->header.stamp;
-          tf2::toMsg(f2m.inverse(), tmp_tf_stamped.pose);
-          
-
-          this->tf_->transform(tmp_tf_stamped, odom_to_map, odom_frame_id_);
-
-        }
-        else
-        {
-          std::cout << "use amcl pose" << std::endl;
-
           tf2::Quaternion q;
-          q.setRPY(0, 0, hyps[max_weight_hyp].pf_pose_mean.v[2]);
-          tf2::Transform tmp_tf(q, tf2::Vector3(hyps[max_weight_hyp].pf_pose_mean.v[0],
-                                                hyps[max_weight_hyp].pf_pose_mean.v[1],
+          q.setRPY(0, 0, paticles[max_weight_hyp].pose.v[2]);
+          tf2::Transform tmp_tf(q, tf2::Vector3(paticles[max_weight_hyp].pose.v[0],
+                                                paticles[max_weight_hyp].pose.v[1],
                                                 0.0));
 
           geometry_msgs::PoseStamped tmp_tf_stamped;
@@ -1628,7 +1531,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
           tf2::toMsg(tmp_tf.inverse(), tmp_tf_stamped.pose);
           // std::cout <<"frame id:  "<< base_frame_id_  << std::endl;
           this->tf_->transform(tmp_tf_stamped, odom_to_map, odom_frame_id_);
-        }
+ 
 
  
       }
@@ -1657,11 +1560,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
         sent_first_transform_ = true;
       }
 
-      if(do_icp)
-      {
-            ld_free(scan_cur);
-            ld_free(scan_ref);
-      }
+
 
     }
     else
