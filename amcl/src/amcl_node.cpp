@@ -2029,8 +2029,7 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
  
 
 
-  for(int i = 0 ; i < 10; i++)
-  {
+ 
  
   icpCalcInitPose(pf_init_pose_mean.v[0], pf_init_pose_mean.v[1], pf_init_pose_mean.v[2], ssptr);
   std::cout << output_.valid << " : "<< output_.error << " : "<< output_.nvalid << " : "<<(output_.error/output_.nvalid)<< std::endl;
@@ -2065,7 +2064,7 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
 
 
   }
-  }
+  
 
   delete initial_pose_hyp_;
   initial_pose_hyp_ = new amcl_hyp_t();
@@ -2115,7 +2114,7 @@ void AmclNode::icpCalcInitPose(double map_x, double map_y, double map_yaw,const 
 
     input_.max_angular_correction_deg = 90.0;
     input_.max_linear_correction = 2.5;
-    input_.max_correspondence_dist = 7.0;
+    input_.max_correspondence_dist = 15.0;
 
 
     input_.min_reading = laser_scan->range_min;
