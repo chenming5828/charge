@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(amcl)
-set( CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}" )
+set( CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
 
 find_package(catkin REQUIRED
   COMPONENTS
@@ -23,8 +23,6 @@ find_package(Boost REQUIRED)
 find_package(Eigen3 REQUIRED)
 include_directories(${EIGEN3_INCLUDE_DIR})
 
-find_package(Protobuf REQUIRED)
-include_directories(${PROTOBUF_INCLUDE_DIR})
 
 # Find csm project
 find_package(PkgConfig)
@@ -82,34 +80,6 @@ add_library(amcl_sensors
 target_link_libraries(amcl_sensors amcl_map amcl_pf)
 
 
-#========================================
-set(proto_dir ${PROJECT_SOURCE_DIR}/proto)
-set(proto_files 
-   ${proto_dir}/laser.proto
-)
-set(proto_gen_dir ${CATKIN_DEVEL_PREFIX}/include/${PROJECT_NAME})
-#file(MAKE_DIRECTORY ${proto_gen_dir})
-# Create lists of files to be generated.
-set(proto_gen_cpp_files "")
-foreach(proto_file ${proto_files})
-    get_filename_component(proto_name ${proto_file} NAME_WE)
-    list(APPEND proto_gen_cpp_files ${proto_gen_dir}/${proto_name}.pb.h ${proto_gen_dir}/${proto_name}.pb.cc)
-endforeach(proto_file ${proto_files})
-# Run protoc and generate language-specific headers.
-add_custom_command(
-    COMMAND ${PROTOBUF_PROTOC_EXECUTABLE} --proto_path=${proto_dir} --cpp_out=${proto_gen_dir} ${proto_files}
-    DEPENDS ${PROTOBUF_PROTOC_EXECUTABLE} ${proto_files}
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    OUTPUT ${proto_gen_cpp_files} 
-)
- 
-# Create proto library for linking.
-# 
-# include_directories(${PROTOBUF_INCLUDE_DIR}  ${PROTOBUF_INCLUDE_DIR}/../../)
-add_library(${PROJECT_NAME}_proto ${proto_gen_cpp_files})
-target_link_libraries(${PROJECT_NAME}_proto ${PROTOBUF_LIBRARY})
-#---------------------------------------
-
 
 add_executable(amcl
                        src/amcl_node.cpp)
@@ -118,7 +88,6 @@ add_dependencies(amcl ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARG
 target_link_libraries(amcl
     amcl_sensors amcl_map amcl_pf
     ${csm_LIBRARIES}
-    ${PROJECT_NAME}_proto
     ${Boost_LIBRARIES}
     ${catkin_LIBRARIES}
 )
