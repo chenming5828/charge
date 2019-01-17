@@ -1,0 +1,9 @@
+# Define the goal
+geometry_msgs/Pose goal_pose
+sensor_msgs/LaserScan goal_scan  
+---
+# Define the result
+bool succeeded
+---
+# Define a feedback message
+geometry_msgs/PoseStamped base_position

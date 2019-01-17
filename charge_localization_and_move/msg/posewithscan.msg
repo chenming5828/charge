@@ -1,2 +1,2 @@
-geometry_msgs/PoseWithCovarianceStamped  amcl
+geometry_msgs/PoseStamped  pose
 sensor_msgs/LaserScan scan

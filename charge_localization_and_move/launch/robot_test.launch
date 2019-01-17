@@ -1,0 +1,31 @@
+<launch>
+  <include file="$(find turtlebot_bringup)/launch/minimal.launch" />
+  <include file="$(find turtlebot_teleop)/launch/myjoystick.launch" />
+ 
+  <node pkg="tf" type="static_transform_publisher" name="base_to_laser" args="-0.13 0.0 0.28 0.0 0.0 0.0 base_link laser 100"/>   
+ 
+  
+
+  <!-- <node pkg="charge_localization_and_move" type="showpose" name="showpose" output="screen" /> -->
+  <node pkg="charge_localization_and_move" type="showodom" name="showodom" output="screen" />
+  <!-- <node pkg="charge_localization_and_move" type="showlaser" name="showlaser" output="screen" /> -->
+  <node pkg="charge_localization_and_move" type="showekf" name="showekf" output="screen" />
+  
+ 
+
+ <node pkg="robot_pose_ekf" type="robot_pose_ekf" name="robot_pose_ekf" output="screen" >
+  <param name="output_frame" value="odom_combined"/>
+  <param name="base_footprint_frame" value="base_footprint"/>
+  <param name="freq" value="30.0"/>
+  <param name="sensor_timeout" value="1.0"/>  
+
+  <param name="odom_used" value="true"/>
+  <param name="imu_used" value="true"/>
+  <param name="vo_used" value="false"/>
+
+  <remap from="imu_data" to="/mobile_base/sensors/imu_data" />
+
+
+  </node>
+ 
+</launch>

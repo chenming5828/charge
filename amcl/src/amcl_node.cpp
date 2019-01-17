@@ -313,7 +313,7 @@ class AmclNode
     // void laserAndInitposeReceived(const sensor_msgs::LaserScanConstPtr& laser_scan,
     //                     const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg);
 
-
+   bool get_laser_;
    sensor_msgs::LaserScan  lastest_scan_;
    void icpCalcInitPose(double map_x, double map_y, double map_yaw,const sensor_msgs::LaserScanConstPtr& laser_scan);
 
@@ -381,7 +381,8 @@ AmclNode::AmclNode() :
 	      private_nh_("~"),
         initial_pose_hyp_(NULL),
         first_map_received_(false),
-        first_reconfigure_call_(true)
+        first_reconfigure_call_(true),
+        get_laser_(false)
 {
   boost::recursive_mutex::scoped_lock l(configuration_mutex_);
 
@@ -1201,6 +1202,7 @@ void
 AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 {
   lastest_scan_ = * laser_scan;
+  get_laser_ = true;
   std::string laser_scan_frame_id = stripSlash(laser_scan->header.frame_id);
   last_laser_received_ts_ = ros::Time::now();
   if( map_ == NULL ) {
@@ -1775,7 +1777,10 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
   pf_init_pose_cov.m[2][2] = msg.pose.covariance[6*5+5];
 
   std::cout << "get init pose " << std::endl;
+  if(get_laser_)
+  {
 
+  
   const sensor_msgs::LaserScanConstPtr ssptr(new sensor_msgs::LaserScan(lastest_scan_)) ;
  
  
@@ -1812,7 +1817,7 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
 
 
   }
-  
+  }
 
   delete initial_pose_hyp_;
   initial_pose_hyp_ = new amcl_hyp_t();

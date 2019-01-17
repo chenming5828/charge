@@ -1,0 +1,7 @@
+1.终端设置当前位置为充电桩
+rostopic pub set_charge std_msgs/Bool '{data: true }'
+
+2.用遥控器移动机器人到地图上任意位置
+
+3.开始找充电桩并对接
+rostopic pub do_charge std_msgs/Bool '{data: true }'
