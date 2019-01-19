@@ -132,21 +132,6 @@ int main(int argc, char** argv)
     ros::spin();
 
 
-    // if(!g_client->waitForServer(ros::Duration(60)))
-    // {
-    //     ROS_ERROR("Can't connected to server");
-    //     return 1;
-    // }
-    // g_client->waitForServer();
-
-    // ROS_ERROR("------------ connected to server--------------");
-
-    // while( ros::ok() )
-    // {
-    //     g_client->waitForResult(ros::Duration(5.0));
-    //     // std::cout << g_client->getState() << std::endl;
-    // }
-    
     
  
  
