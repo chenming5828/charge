@@ -90,10 +90,10 @@ void executeCb(const charge_localization_and_move::chargeGoalConstPtr& goal)
     double e_yaw_pre = 0;
     double e_dis = 0;
     double e_dis_pre = 0;
-    double kp_yaw = 6;
-    double kd_yaw = 10;
-    double kp_dis = 6;
-    double kd_dis = 10;
+    double kp_yaw = 5;
+    double kd_yaw = 0;
+    double kp_dis = 50;
+    double kd_dis = 20;
     bool flag_pid = false;
     const double w_max = 0.3;
     double error_x ,error_y,error_yaw;
@@ -149,7 +149,7 @@ void executeCb(const charge_localization_and_move::chargeGoalConstPtr& goal)
               break;
             }
 
-            if(output_.x[0] < 0.1)
+            if(output_.x[0] < 0.4)
             {
               vel.linear.x= -0.1;
             }
@@ -161,7 +161,7 @@ void executeCb(const charge_localization_and_move::chargeGoalConstPtr& goal)
             e_dis = output_.x[1];
             if(flag_pid)
             {
-              vel.angular.z = kp_dis * e_dis + kd_dis * e_dis_pre + kp_yaw * e_yaw + kd_yaw * e_yaw_pre;
+              vel.angular.z = kp_dis * e_dis + kd_dis * (e_dis - e_dis_pre) + kp_yaw * e_yaw + kd_yaw * (e_yaw - e_yaw_pre);
             }
             else
             {
@@ -170,6 +170,14 @@ void executeCb(const charge_localization_and_move::chargeGoalConstPtr& goal)
               error_y = output_.x[1];
               error_yaw = output_.x[2];
               vel.angular.z = kp_dis * e_dis + kp_yaw * e_yaw; 
+            }
+            if(vel.angular.z > 0.3)
+            {
+              vel.angular.z = 0.3;
+            }
+            else if(vel.angular.z < -0.3)
+            {
+              vel.angular.z = -0.3;
             }
             std::cout << "======================================================"<< std::endl;
             std::cout << error_x << "  "<< error_y << "  "<< error_yaw  << std::endl;
