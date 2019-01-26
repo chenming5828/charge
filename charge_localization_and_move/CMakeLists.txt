@@ -105,8 +105,13 @@ target_link_libraries(charge_navigation_server
 
 
 
-
-
+# ==============================================some test case====================
+add_executable(test_time_synchronizer test/test_time_synchronizer.cpp  )
+target_link_libraries(test_time_synchronizer
+    ${csm_LIBRARIES}
+    ${Boost_LIBRARIES}
+    ${catkin_LIBRARIES}
+)
 
 
 

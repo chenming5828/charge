@@ -15,12 +15,16 @@
 #include "tf2_ros/message_filter.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
-#include "message_filters/subscriber.h"
 
 #include "nav_msgs/Odometry.h"
 #include "sensor_msgs/LaserScan.h"
 #include <tf/transform_broadcaster.h>
 #include <mutex>     
+#include <message_filters/subscriber.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <std_msgs/Float64.h>
+
+
 
 
 #include <csm/csm_all.h>   
@@ -31,7 +35,29 @@ typedef actionlib::SimpleActionServer<charge_localization_and_move::chargeAction
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> moveBaseClient;
 
-#define PREDOCK_FORWARD                 (0.5)
+#define PREDOCK_FORWARD                 (2.2)
+// #define KP_DIS_FAR                          (40)
+// #define KP_DIS_NEAR                          (20)
+// #define KD_DIS_FAR                          (10)
+// #define KD_DIS_NEAR                          (20)
+#define KI_DIS                          (0)
+#define KP_DIS                         (20)
+#define KD_DIS                          (5)
+// #define KD_DIS                          (20)
+
+
+#define KP_YAW                          (5)
+#define KD_YAW                          (0)
+#define KI_YAW                          (0)
+
+#define STOP_DIS                         (0.003)
+#define DIS_PID                         (0.02)
+
+
+static double normalize(double z)
+{
+  return atan2(sin(z),cos(z));
+}
 
 class dock_server
 {
@@ -43,6 +69,7 @@ class dock_server
         sm_params                   m_input;
         sm_result                   m_output;
         std::mutex                  m_mtx;
+        std::mutex                  m_mtx_pose;
         sensor_msgs::LaserScan      m_lastest_scan;
         bool                        m_get_laser;
         moveBaseClient*             m_move_base_client;
@@ -52,10 +79,25 @@ class dock_server
         ros::Publisher              m_vel_pub;
         ros::Subscriber             m_laser_sub;
 
+        message_filters::Subscriber<nav_msgs::Odometry>*    m_odom_sub;
+        tf2_ros::MessageFilter<nav_msgs::Odometry>*         m_tf2_filter;
+
+        std::shared_ptr<tf2_ros::Buffer> m_tf;
+        std::shared_ptr<tf2_ros::TransformListener> m_tfl;
+
+        geometry_msgs::PoseStamped     m_current_pose;
+        bool                           has_robot_pose;
+
+        //debug
+        ros::Publisher   dis_pub ;
+        ros::Publisher   yaw_pub ;
+
         double                      m_kp_yaw;          
         double                      m_kd_yaw;          
+        double                      m_ki_yaw;          
         double                      m_kp_dis;          
         double                      m_kd_dis;          
+        double                      m_ki_dis;          
 
         void initIcpParams();
         void laserScanToLDP(sensor_msgs::LaserScan& scan_msg,
@@ -69,6 +111,10 @@ class dock_server
                                     sensor_msgs::LaserScan& scan_ref);
 
 
+        void odomTfCallback(const nav_msgs::Odometry::ConstPtr& odom_msg);
+
+
+
 
 
 
@@ -76,14 +122,35 @@ class dock_server
 
 };
 
+  
+
 dock_server::dock_server():
     m_move_base_client(NULL),
     m_charge_server(NULL),
-    m_get_laser(false)
+    m_get_laser(false),
+    has_robot_pose(false)
 {
+
+    m_tf.reset(new tf2_ros::Buffer());
+    m_tfl.reset(new tf2_ros::TransformListener(*m_tf));
+
+    m_odom_sub = new message_filters::Subscriber<nav_msgs::Odometry>(m_nh, "odom", 100);
+
+    m_tf2_filter = new tf2_ros::MessageFilter<nav_msgs::Odometry>(*m_odom_sub,
+                                                               *m_tf,
+                                                               "map",
+                                                                100,
+                                                                m_nh);
+    m_tf2_filter->registerCallback(boost::bind(&dock_server::odomTfCallback, this, _1));
     
+
+
     m_laser_sub = m_nh.subscribe("scan", 1, &dock_server::laserReceived,this);
     m_vel_pub = m_nh.advertise<geometry_msgs::Twist>("/mobile_base/commands/velocity", 1);
+
+    dis_pub = m_nh.advertise<std_msgs::Float64>("error_dis", 1);
+    yaw_pub = m_nh.advertise<std_msgs::Float64>("error_yaw", 1);
+
     initIcpParams();
 
     m_charge_server = new chargeServer(m_nh, "dock_charge", boost::bind(&dock_server::executeCb, this, _1), false);
@@ -91,11 +158,37 @@ dock_server::dock_server():
     m_charge_server->start();
 
     // m_kp_yaw = 5;
-    m_kp_yaw = 30;
-    m_kd_yaw = 5;
-    m_kp_dis = 100;
-    m_kd_dis = 30;
+    m_kp_yaw = KP_YAW;
+    m_kd_yaw = KD_YAW;
+    m_ki_yaw = KI_YAW;
 
+    m_ki_dis = KI_DIS;
+    m_kp_dis = KP_DIS;
+    m_kd_dis = KD_DIS;
+
+}
+
+void dock_server::odomTfCallback(const nav_msgs::Odometry::ConstPtr& odom_msg)
+{
+    // std::cout << "get a odom msg "<< std::endl;
+    
+    geometry_msgs::PoseStamped odom_pose;
+    odom_pose.header = odom_msg->header;
+    odom_pose.pose = odom_msg->pose.pose;
+    m_mtx_pose.lock();
+    try 
+    {
+        
+        m_tf->transform(odom_pose, m_current_pose, "map");
+        has_robot_pose = true;
+    }
+    catch (tf2::TransformException &ex) 
+    {
+        ROS_WARN("Failure %s\n", ex.what()); 
+    }
+    m_mtx_pose.unlock();
+
+    
 }
 
 bool dock_server::icpGetRelativePose(sensor_msgs::LaserScan& scan_cur,sensor_msgs::LaserScan& scan_ref)
@@ -141,6 +234,8 @@ bool dock_server::icpGetRelativePose(sensor_msgs::LaserScan& scan_cur,sensor_msg
 }
 
 
+
+
 void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstPtr& goal)
 {
     std::cout << "---start to go to charge dock" << std::endl;
@@ -171,18 +266,34 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
    
     double e_yaw = 0;
     double e_yaw_pre = 0;
+
     double e_dis = 0;
     double e_dis_pre = 0;
+    double e_dis_add = 0;
+
+
+    // double out_error = 0;
+    // double out_error_pre = 0;
+    // double out_error_add = 0;
+
+    // double in_error = 0;
+    // double in_error_pre = 0;
+    // double in_error_add = 0;
+
+    // const double out_max = 1.0;
+    const double w_max = 0.3;
 
     bool flag_pid = false;
-    const double w_max = 0.3;
     double error_x ,error_y,error_yaw;
     ros::NodeHandle n;
+
+  
+
     while(n.ok())
     {
         if(!m_get_laser)
         {
-            std::cout <<" can not recieve laser, please check laser!!!" << std::endl;
+            std::cout <<" can not recieve laser, please check laser !!!" << std::endl;
             break;
         }
         m_mtx.lock();
@@ -201,7 +312,7 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
             vel.angular.y = 0;
             vel.angular.z = 0;
 
-            if(m_output.x[0] < 0.003 )
+            if(m_output.x[0] < STOP_DIS )
             {
               vel.linear.x = 0;
               m_vel_pub.publish(vel);
@@ -214,20 +325,34 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
               vel.linear.x = -0.1;
             }
 
-            e_yaw = 0 - m_output.x[2];
-            e_dis = m_output.x[1];
 
+            e_dis = m_output.x[1];
+            e_yaw = 0 - m_output.x[2];
+            e_dis_add += e_dis;
+            // if(fabs(e_dis) < DIS_PID)
+            // {
+            //     m_kp_dis = KP_DIS_NEAR;
+            //     m_kd_dis = KD_DIS_NEAR;
+            // }
+            // else
+            // {
+            //     m_kp_dis = KP_DIS_FAR;
+            //     m_kd_dis = KD_DIS_FAR;
+                
+            // }
+            
             if(flag_pid)
             {
-              vel.angular.z = m_kp_dis * e_dis + m_kd_dis * (e_dis - e_dis_pre) + m_kp_yaw * e_yaw + m_kd_yaw * (e_yaw - e_yaw_pre);
+                vel.angular.z = m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kd_dis * (e_dis - e_dis_pre) + m_kp_yaw * e_yaw + m_kd_yaw * (e_yaw - e_yaw_pre);
             }
             else
             {
-              flag_pid = true;
-              error_x = m_output.x[0];
-              error_y = m_output.x[1];
-              error_yaw = m_output.x[2];
-              vel.angular.z = m_kp_dis * e_dis + m_kp_yaw * e_yaw; 
+                flag_pid = true;
+                error_x = m_output.x[0];
+                error_y = m_output.x[1];
+                error_yaw = m_output.x[2];
+
+                vel.angular.z =  m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kp_yaw * e_yaw;  
             }
             if(vel.angular.z > w_max)
             {
@@ -240,22 +365,138 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
 
             std::cout << "======================================================"<< std::endl;
             std::cout << error_x << "  "<< error_y << "  "<< error_yaw  << std::endl;
-            std::cout << e_dis << "  "<< e_yaw << std::endl;
             std::cout << m_output.x[0] << "  "<< m_output.x[1] << "  "<< m_output.x[2] << "   " << vel.angular.z << std::endl;
+            double  ee = e_dis - e_dis_pre;
+            std::cout << e_dis << " : "<< ee << std::endl;
             m_vel_pub.publish(vel);
-
-
             e_dis_pre = e_dis;
             e_yaw_pre = e_yaw;
+
+                std_msgs::Float64 tmp_yaw ;
+                tmp_yaw.data = vel.angular.z;
+                yaw_pub.publish(tmp_yaw);
 
 
 
         }
         else
         {
-            std::cout << "error with icp" << std::endl;
-            std::cout << m_output.valid << "  "<< m_output.error/m_output.nvalid << std::endl;
+            std::cout << "error no  icp,use amcl pose|| " 
+                        << m_output.valid << "  "<< m_output.error/m_output.nvalid << std::endl;
+            
+            if(has_robot_pose)
+            {
+                m_mtx_pose.lock();
+                geometry_msgs::PoseStamped pose_cur = m_current_pose;
+                m_mtx_pose.unlock();
+                double yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
+                double offset_yaw = yaw_cur - ba;
+                offset_yaw = normalize(offset_yaw);
+
+                double m_x = pose_cur.pose.position.x - bx;
+                double m_y = pose_cur.pose.position.y - by;
+                // to goal cordinatory
+                double offset_x = m_x * cos(ba) + m_y * sin(ba);
+                double offset_y = m_y * cos(ba) - m_x * sin(ba);
+
+         
+                geometry_msgs::Twist vel;
+                vel.linear.y = 0;
+                vel.linear.z = 0;
+                vel.linear.x = -0.15;
+                vel.angular.x = 0;
+                vel.angular.y = 0;
+                vel.angular.z = 0;
+
+                if( offset_x < STOP_DIS )
+                {
+                    vel.linear.x = 0;
+                    m_vel_pub.publish(vel);
+                    std::cout << "offset is out " << std::endl;
+                
+                    break;
+                }
+
+                if(offset_x < 0.4)
+                {
+                    vel.linear.x = -0.1;
+                }
+
+                
+                e_dis = offset_y;
+                e_yaw = 0 - offset_yaw;
+                e_dis_add += e_dis;
+
+
+                // if(fabs(e_dis) < DIS_PID)
+                // {
+                //     m_kp_dis = KP_DIS_NEAR;
+                //     m_kd_dis = KD_DIS_NEAR;
+                // }
+                // else
+                // {
+                //     m_kp_dis = KP_DIS_FAR;
+                //     m_kd_dis = KD_DIS_FAR;
+                    
+                // }
+                if(flag_pid)
+                {
+              
+                    vel.angular.z = m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kd_dis * (e_dis - e_dis_pre) + m_kp_yaw * e_yaw + m_kd_yaw * (e_yaw - e_yaw_pre);
+        
+                }
+                else
+                {
+                    flag_pid = true;
+                    error_x = offset_x;
+                    error_y = offset_y;
+                    error_yaw = offset_yaw;
+
+                    vel.angular.z = m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kp_yaw * e_yaw;
+
+                    
+                }
+                if(vel.angular.z > w_max)
+                {
+                    vel.angular.z = w_max;
+                }
+                else if(vel.angular.z < -w_max)
+                {
+                    vel.angular.z = -w_max;
+                }
+
+                std::cout << "======================================================"<< std::endl;
+                std::cout << error_x << "  "<< error_y << "  "<< error_yaw  << std::endl;
+  
+                std::cout << offset_x << "  "<< offset_y << "  "<< offset_yaw << "   " << vel.angular.z << std::endl;
+                double  ee = e_dis - e_dis_pre;
+                std::cout << e_dis << " : "<< ee << std::endl;
+
+                m_vel_pub.publish(vel);
+
+                e_dis_pre = e_dis;
+                e_yaw_pre = e_yaw;
+
+                std_msgs::Float64 tmp_yaw ;
+                tmp_yaw.data = vel.angular.z;
+                yaw_pub.publish(tmp_yaw);
+
+
+            }
+            else
+            {
+                std::cout << "error with no pose" << std::endl;
+                break;
+            }
         }
+
+
+        // std_msgs::Float64 tmp_yaw ;
+        std_msgs::Float64 tmp_dis ;
+        // tmp_yaw.data = e_yaw;
+        tmp_dis.data = e_dis;
+        dis_pub.publish(tmp_dis);
+        // yaw_pub.publish(tmp_yaw);
 
     }
     geometry_msgs::Twist vel;
@@ -270,6 +511,7 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     m_vel_pub.publish(vel);
     m_vel_pub.publish(vel);
     m_vel_pub.publish(vel);
+    
     m_mtx.lock();
     sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
     m_mtx.unlock();
@@ -304,9 +546,9 @@ void dock_server::initIcpParams()
     m_output.cov_x_m = 0;
     m_output.dx_dy1_m = 0;
     m_output.dx_dy2_m = 0;
-    m_input.max_angular_correction_deg = 60.0;
-    m_input.max_linear_correction = 1.2;
-    m_input.max_correspondence_dist = 3.4;
+    m_input.max_angular_correction_deg = 70.0;
+    m_input.max_linear_correction = 0.7;
+    m_input.max_correspondence_dist = 10;
     m_input.max_iterations = 40;
     m_input.epsilon_xy = 0.0001;
     m_input.epsilon_theta = 0.0001;
