@@ -35,14 +35,14 @@ typedef actionlib::SimpleActionServer<charge_localization_and_move::chargeAction
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> moveBaseClient;
 
-#define PREDOCK_FORWARD                 (2.2)
+#define PREDOCK_FORWARD                 (2.0)
 // #define KP_DIS_FAR                          (40)
 // #define KP_DIS_NEAR                          (20)
 // #define KD_DIS_FAR                          (10)
 // #define KD_DIS_NEAR                          (20)
 #define KI_DIS                          (0)
-#define KP_DIS                         (20)
-#define KD_DIS                          (5)
+#define KP_DIS                         (35)
+#define KD_DIS                          (50)
 // #define KD_DIS                          (20)
 
 
@@ -288,9 +288,10 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     ros::NodeHandle n;
 
   
-
+    ros::Rate r(50);
     while(n.ok())
     {
+        r.sleep();
         if(!m_get_laser)
         {
             std::cout <<" can not recieve laser, please check laser !!!" << std::endl;
@@ -329,6 +330,7 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
             e_dis = m_output.x[1];
             e_yaw = 0 - m_output.x[2];
             e_dis_add += e_dis;
+            std::cout << "---add ----" << e_dis_add << std::endl;
             // if(fabs(e_dis) < DIS_PID)
             // {
             //     m_kp_dis = KP_DIS_NEAR;
@@ -373,7 +375,7 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
             e_yaw_pre = e_yaw;
 
                 std_msgs::Float64 tmp_yaw ;
-                tmp_yaw.data = vel.angular.z;
+                tmp_yaw.data = e_dis_add;
                 yaw_pub.publish(tmp_yaw);
 
 
@@ -426,6 +428,7 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
                 e_dis = offset_y;
                 e_yaw = 0 - offset_yaw;
                 e_dis_add += e_dis;
+                std::cout << "---add ----" << e_dis_add << std::endl;
 
 
                 // if(fabs(e_dis) < DIS_PID)
@@ -478,7 +481,7 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
                 e_yaw_pre = e_yaw;
 
                 std_msgs::Float64 tmp_yaw ;
-                tmp_yaw.data = vel.angular.z;
+                tmp_yaw.data = e_dis_add;
                 yaw_pub.publish(tmp_yaw);
 
 
@@ -511,7 +514,7 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     m_vel_pub.publish(vel);
     m_vel_pub.publish(vel);
     m_vel_pub.publish(vel);
-    
+
     m_mtx.lock();
     sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
     m_mtx.unlock();
