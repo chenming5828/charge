@@ -7,4 +7,4 @@ rostopic pub set_charge std_msgs/Bool '{data: true }'
 rostopic pub do_charge std_msgs/Bool '{data: true }'
 
 test vel note:
-rostopic pub mobile_base/commands/velocity geometry_msgs/Twist '{linear: {x: 0, y: 0, z: 0,}, angular: {x: 0, y: 0, z: 0.2,} }'
+rostopic pub --rate=100 mobile_base/commands/velocity geometry_msgs/Twist '{linear: {x: -0.1, y: 0, z: 0,}, angular: {x: 0, y: 0, z: 0.3,} }'

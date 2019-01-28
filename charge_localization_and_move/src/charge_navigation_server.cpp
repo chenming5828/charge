@@ -41,8 +41,8 @@ typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> moveBaseCl
 // #define KD_DIS_FAR                          (10)
 // #define KD_DIS_NEAR                          (20)
 #define KI_DIS                          (0)
-#define KP_DIS                         (35)
-#define KD_DIS                          (50)
+#define KP_DIS                         (100)
+#define KD_DIS                          (0)
 // #define KD_DIS                          (20)
 
 
@@ -272,12 +272,12 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     double e_dis_add = 0;
 
 
-    // double out_error = 0;
+    double out_error = 0;
     // double out_error_pre = 0;
     // double out_error_add = 0;
 
-    // double in_error = 0;
-    // double in_error_pre = 0;
+    double in_error = 0;
+    double in_error_pre = 0;
     // double in_error_add = 0;
 
     // const double out_max = 1.0;
@@ -287,107 +287,65 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     double error_x ,error_y,error_yaw;
     ros::NodeHandle n;
 
-  
-    ros::Rate r(50);
+    const double kp_out = 15;
+    const double max_angle = 0.7;
+    int cnt_flag = 0;
+    const int cnt_max = 200;
+    double angle_exp = 0;
+
+    const double kp_in = 10;
+    const double kd_in = 2;
+
+    
+
+    // ros::Rate r(100);
+    //这个需要满足turtlebot的时间频率
     while(n.ok())
     {
-        r.sleep();
-        if(!m_get_laser)
+        // r.sleep();
+        if(!m_get_laser || !has_robot_pose)
         {
-            std::cout <<" can not recieve laser, please check laser !!!" << std::endl;
-            break;
-        }
-        m_mtx.lock();
-        sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
-        m_mtx.unlock();
-
-
-
-        if(icpGetRelativePose(scan_copy,goal_scan))
-        {
+            std::cout <<" No laser or no Pose, please check laser and localization!!!" << std::endl;
             geometry_msgs::Twist vel;
-            vel.linear.y = 0;
-            vel.linear.z = 0;
-            vel.linear.x = -0.15;
-            vel.angular.x = 0;
-            vel.angular.y = 0;
-            vel.angular.z = 0;
-
-            if(m_output.x[0] < STOP_DIS )
-            {
-              vel.linear.x = 0;
-              m_vel_pub.publish(vel);
+            vel.linear.y= 0;
+            vel.linear.z= 0;
+            vel.linear.x= 0;
             
-              break;
-            }
+            vel.angular.x= 0;
+            vel.angular.y= 0;
+            vel.angular.z= 0;
 
-            if(m_output.x[0] < 0.4)
+            m_vel_pub.publish(vel);
+            m_vel_pub.publish(vel);
+            m_vel_pub.publish(vel);
+            m_charge_server->setAborted();
+            return;
+        }
+        if(cnt_flag == 0)
+        {
+            m_mtx.lock();
+            sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
+            m_mtx.unlock();
+            if(icpGetRelativePose(scan_copy,goal_scan))
             {
-              vel.linear.x = -0.1;
-            }
 
+                out_error = m_output.x[1];
+                angle_exp = kp_out * out_error;
 
-            e_dis = m_output.x[1];
-            e_yaw = 0 - m_output.x[2];
-            e_dis_add += e_dis;
-            std::cout << "---add ----" << e_dis_add << std::endl;
-            // if(fabs(e_dis) < DIS_PID)
-            // {
-            //     m_kp_dis = KP_DIS_NEAR;
-            //     m_kd_dis = KD_DIS_NEAR;
-            // }
-            // else
-            // {
-            //     m_kp_dis = KP_DIS_FAR;
-            //     m_kd_dis = KD_DIS_FAR;
-                
-            // }
-            
-            if(flag_pid)
-            {
-                vel.angular.z = m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kd_dis * (e_dis - e_dis_pre) + m_kp_yaw * e_yaw + m_kd_yaw * (e_yaw - e_yaw_pre);
+                if(angle_exp > max_angle )
+                {
+                    angle_exp = max_angle;
+                }
+                else if(angle_exp < (-1.0 * max_angle))
+                {
+                    angle_exp = (-1.0 * max_angle);
+                }    
             }
             else
             {
-                flag_pid = true;
-                error_x = m_output.x[0];
-                error_y = m_output.x[1];
-                error_yaw = m_output.x[2];
-
-                vel.angular.z =  m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kp_yaw * e_yaw;  
-            }
-            if(vel.angular.z > w_max)
-            {
-              vel.angular.z = w_max;
-            }
-            else if(vel.angular.z < -w_max)
-            {
-              vel.angular.z = -w_max;
-            }
-
-            std::cout << "======================================================"<< std::endl;
-            std::cout << error_x << "  "<< error_y << "  "<< error_yaw  << std::endl;
-            std::cout << m_output.x[0] << "  "<< m_output.x[1] << "  "<< m_output.x[2] << "   " << vel.angular.z << std::endl;
-            double  ee = e_dis - e_dis_pre;
-            std::cout << e_dis << " : "<< ee << std::endl;
-            m_vel_pub.publish(vel);
-            e_dis_pre = e_dis;
-            e_yaw_pre = e_yaw;
-
-                std_msgs::Float64 tmp_yaw ;
-                tmp_yaw.data = e_dis_add;
-                yaw_pub.publish(tmp_yaw);
-
-
-
-        }
-        else
-        {
-            std::cout << "error no  icp,use amcl pose|| " 
-                        << m_output.valid << "  "<< m_output.error/m_output.nvalid << std::endl;
+                // std::cout << "error no  icp,use amcl pose|| " 
+                //     << m_output.valid << "  "<< m_output.error/m_output.nvalid << std::endl;
             
-            if(has_robot_pose)
-            {
                 m_mtx_pose.lock();
                 geometry_msgs::PoseStamped pose_cur = m_current_pose;
                 m_mtx_pose.unlock();
@@ -401,106 +359,118 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
                 double offset_x = m_x * cos(ba) + m_y * sin(ba);
                 double offset_y = m_y * cos(ba) - m_x * sin(ba);
 
-         
-                geometry_msgs::Twist vel;
-                vel.linear.y = 0;
-                vel.linear.z = 0;
-                vel.linear.x = -0.15;
-                vel.angular.x = 0;
-                vel.angular.y = 0;
-                vel.angular.z = 0;
-
-                if( offset_x < STOP_DIS )
-                {
-                    vel.linear.x = 0;
-                    m_vel_pub.publish(vel);
-                    std::cout << "offset is out " << std::endl;
-                
-                    break;
-                }
-
-                if(offset_x < 0.4)
-                {
-                    vel.linear.x = -0.1;
-                }
-
-                
-                e_dis = offset_y;
-                e_yaw = 0 - offset_yaw;
-                e_dis_add += e_dis;
-                std::cout << "---add ----" << e_dis_add << std::endl;
-
-
-                // if(fabs(e_dis) < DIS_PID)
-                // {
-                //     m_kp_dis = KP_DIS_NEAR;
-                //     m_kd_dis = KD_DIS_NEAR;
-                // }
-                // else
-                // {
-                //     m_kp_dis = KP_DIS_FAR;
-                //     m_kd_dis = KD_DIS_FAR;
-                    
-                // }
-                if(flag_pid)
-                {
-              
-                    vel.angular.z = m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kd_dis * (e_dis - e_dis_pre) + m_kp_yaw * e_yaw + m_kd_yaw * (e_yaw - e_yaw_pre);
         
-                }
-                else
+               
+                out_error = offset_y;
+                angle_exp = kp_out * out_error;
+
+                if(angle_exp > max_angle )
                 {
-                    flag_pid = true;
-                    error_x = offset_x;
-                    error_y = offset_y;
-                    error_yaw = offset_yaw;
-
-                    vel.angular.z = m_kp_dis * e_dis + m_ki_dis * e_dis_add + m_kp_yaw * e_yaw;
-
-                    
+                    angle_exp = max_angle;
                 }
-                if(vel.angular.z > w_max)
+                else if(angle_exp < (-1.0 * max_angle))
                 {
-                    vel.angular.z = w_max;
+                    angle_exp = (-1.0 * max_angle);
                 }
-                else if(vel.angular.z < -w_max)
-                {
-                    vel.angular.z = -w_max;
-                }
+              
+            }
 
-                std::cout << "======================================================"<< std::endl;
-                std::cout << error_x << "  "<< error_y << "  "<< error_yaw  << std::endl;
-  
-                std::cout << offset_x << "  "<< offset_y << "  "<< offset_yaw << "   " << vel.angular.z << std::endl;
-                double  ee = e_dis - e_dis_pre;
-                std::cout << e_dis << " : "<< ee << std::endl;
+            std::cout << "================================================================" << angle_exp << "   :   " << out_error << std::endl;
+            
+            in_error = 0;
+            in_error_pre = 0;
+            cnt_flag ++;
+            
 
-                m_vel_pub.publish(vel);
-
-                e_dis_pre = e_dis;
-                e_yaw_pre = e_yaw;
-
-                std_msgs::Float64 tmp_yaw ;
-                tmp_yaw.data = e_dis_add;
-                yaw_pub.publish(tmp_yaw);
-
-
+        }
+        else
+        {
+            m_mtx.lock();
+            sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
+            m_mtx.unlock();
+            double x = 0;
+            double y = 0;
+            double zz = 0;
+            if(icpGetRelativePose(scan_copy,goal_scan))
+            {
+                in_error = angle_exp - m_output.x[2];
+                x = m_output.x[0];
+                y = m_output.x[1];
+                zz = m_output.x[2];
             }
             else
             {
-                std::cout << "error with no pose" << std::endl;
-                break;
+                
+                // std::cout << "error no  icp,use amcl pose|| " 
+                //     << m_output.valid << "  "<< m_output.error/m_output.nvalid << std::endl;
+            
+                m_mtx_pose.lock();
+                geometry_msgs::PoseStamped pose_cur = m_current_pose;
+                m_mtx_pose.unlock();
+                double yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
+                double offset_yaw = yaw_cur - ba;
+                offset_yaw = normalize(offset_yaw);
+
+                double m_x = pose_cur.pose.position.x - bx;
+                double m_y = pose_cur.pose.position.y - by;
+                // to goal cordinatory
+                double offset_x = m_x * cos(ba) + m_y * sin(ba);
+                double offset_y = m_y * cos(ba) - m_x * sin(ba); 
+                x = offset_x;
+                y = offset_y;
+                zz = offset_yaw;
+
+                in_error = angle_exp - offset_yaw;
+
+
             }
+            
+
+
+            double z = in_error * kp_in + (in_error - in_error_pre) * kd_in;
+
+            
+
+            if(z > w_max)
+            {
+              z = w_max;
+            }
+            else if(z < -w_max)
+            {
+              z = -w_max;
+            }
+
+            std::cout << "yaw : "<< zz << "  in_error : " << in_error << " z :  " << z << " y: "<< y << std::endl;
+
+            geometry_msgs::Twist vel;
+            vel.linear.y = 0;
+            vel.linear.z = 0;
+            vel.linear.x = -0.15;
+            vel.angular.x = 0;
+            vel.angular.y = 0;
+            vel.angular.z = 0;
+
+            if(x < STOP_DIS )
+            {
+              vel.linear.x = 0;
+              m_vel_pub.publish(vel);
+            
+              break;
+            }
+
+            if(x < 0.4)
+            {
+              vel.linear.x = -0.1;
+            }
+            vel.angular.z = z;
+            m_vel_pub.publish(vel);
+ 
+            in_error_pre = in_error;
+            cnt_flag ++;
+            cnt_flag = cnt_flag % cnt_max;
+
+            
         }
-
-
-        // std_msgs::Float64 tmp_yaw ;
-        std_msgs::Float64 tmp_dis ;
-        // tmp_yaw.data = e_yaw;
-        tmp_dis.data = e_dis;
-        dis_pub.publish(tmp_dis);
-        // yaw_pub.publish(tmp_yaw);
-
     }
     geometry_msgs::Twist vel;
     vel.linear.y= 0;
