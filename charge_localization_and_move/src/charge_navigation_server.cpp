@@ -35,15 +35,12 @@ typedef actionlib::SimpleActionServer<charge_localization_and_move::chargeAction
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> moveBaseClient;
 
-#define PREDOCK_FORWARD                 (2.0)
-// #define KP_DIS_FAR                          (40)
-// #define KP_DIS_NEAR                          (20)
-// #define KD_DIS_FAR                          (10)
-// #define KD_DIS_NEAR                          (20)
-#define KI_DIS                          (0)
-#define KP_DIS                         (100)
-#define KD_DIS                          (0)
-// #define KD_DIS                          (20)
+#define PREDOCK_FORWARD                 (1.0)
+
+#define KI_DIS                          (0.03)
+#define KP_DIS                         (30)
+#define KD_DIS                          (5)
+
 
 
 #define KP_YAW                          (5)
@@ -51,7 +48,7 @@ typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> moveBaseCl
 #define KI_YAW                          (0)
 
 #define STOP_DIS                         (0.003)
-#define DIS_PID                         (0.02)
+#define ERROR_ICP                         (0.03)
 
 
 static double normalize(double z)
@@ -86,11 +83,12 @@ class dock_server
         std::shared_ptr<tf2_ros::TransformListener> m_tfl;
 
         geometry_msgs::PoseStamped     m_current_pose;
-        bool                           has_robot_pose;
+        bool                           m_has_robot_pose;
 
         //debug
         ros::Publisher   dis_pub ;
         ros::Publisher   yaw_pub ;
+        ros::Publisher   y_pub ;
 
         double                      m_kp_yaw;          
         double                      m_kd_yaw;          
@@ -113,6 +111,9 @@ class dock_server
 
         void odomTfCallback(const nav_msgs::Odometry::ConstPtr& odom_msg);
 
+        void pubZeroVel();
+
+
 
 
 
@@ -128,7 +129,7 @@ dock_server::dock_server():
     m_move_base_client(NULL),
     m_charge_server(NULL),
     m_get_laser(false),
-    has_robot_pose(false)
+    m_has_robot_pose(false)
 {
 
     m_tf.reset(new tf2_ros::Buffer());
@@ -150,6 +151,7 @@ dock_server::dock_server():
 
     dis_pub = m_nh.advertise<std_msgs::Float64>("error_dis", 1);
     yaw_pub = m_nh.advertise<std_msgs::Float64>("error_yaw", 1);
+    y_pub = m_nh.advertise<std_msgs::Float64>("error_y", 1);
 
     initIcpParams();
 
@@ -180,7 +182,7 @@ void dock_server::odomTfCallback(const nav_msgs::Odometry::ConstPtr& odom_msg)
     {
         
         m_tf->transform(odom_pose, m_current_pose, "map");
-        has_robot_pose = true;
+        m_has_robot_pose = true;
     }
     catch (tf2::TransformException &ex) 
     {
@@ -197,6 +199,8 @@ bool dock_server::icpGetRelativePose(sensor_msgs::LaserScan& scan_cur,sensor_msg
         LDP ldp_ref;
         laserScanToLDP(scan_ref,ldp_ref);
         laserScanToLDP(scan_cur,ldp_cur);
+        // std::cout<<  "size " << scan_cur.ranges.size()<< std::endl;
+        const double valid_size = scan_cur.ranges.size()/3.0;
 
         m_input.laser_ref  = ldp_ref;
         m_input.laser_sens = ldp_cur;
@@ -224,7 +228,7 @@ bool dock_server::icpGetRelativePose(sensor_msgs::LaserScan& scan_cur,sensor_msg
         ld_free(ldp_cur);
         ld_free(ldp_ref);
 
-        if (m_output.valid && (m_output.error/m_output.nvalid) < 0.05 )
+        if (m_output.valid && (m_output.error/m_output.nvalid) < ERROR_ICP && (m_output.nvalid > valid_size))
         {
             return true;
         }
@@ -259,219 +263,227 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     
     std::cout << "go to pre dock" << std::endl;
     m_move_base_client->waitForResult();
+    
+
+    if(m_move_base_client->getState() != actionlib::SimpleClientGoalState::SUCCEEDED)
+    {
+        std::cout << "move base error " << std::endl;
+        m_charge_server->setAborted();
+        return ;
+    }
+
     std::cout << "arrival in  pre dock" << std::endl;
+  
 
     sensor_msgs::LaserScan goal_scan = goal->goal_scan;
 
    
     double e_yaw = 0;
     double e_yaw_pre = 0;
+    double e_yaw_add = 0;
 
     double e_dis = 0;
     double e_dis_pre = 0;
     double e_dis_add = 0;
 
+    const double w_max = 0.4;
 
-    double out_error = 0;
-    // double out_error_pre = 0;
-    // double out_error_add = 0;
-
-    double in_error = 0;
-    double in_error_pre = 0;
-    // double in_error_add = 0;
-
-    // const double out_max = 1.0;
-    const double w_max = 0.3;
-
-    bool flag_pid = false;
     double error_x ,error_y,error_yaw;
+    bool flag_init = true;
     ros::NodeHandle n;
 
-    const double kp_out = 15;
-    const double max_angle = 0.7;
-    int cnt_flag = 0;
-    const int cnt_max = 200;
-    double angle_exp = 0;
+     
+    // while(n.ok())
+    // {
 
-    const double kp_in = 10;
-    const double kd_in = 2;
+
+    //         m_mtx.lock();
+    //         sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
+    //         m_mtx.unlock();
+    //         if(icpGetRelativePose(scan_copy,goal_scan))
+    //         {
+    //             std::cout <<  "********|||||---- : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
+    //                         << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
+
+    //                 std_msgs::Float64 tmp_dis ;
+    //                 tmp_dis.data = m_output.x[0];
+    //                 dis_pub.publish(tmp_dis);
+    //                 tmp_dis.data = m_output.x[1];
+    //                 y_pub.publish(tmp_dis);
+    //                 tmp_dis.data = m_output.x[2];
+    //                 yaw_pub.publish(tmp_dis);
+    //         }
+    //         else
+    //         {
+    //             std::cout <<" ==================error============" << std::endl;
+    //             std::cout <<  "result : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
+    //                         << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
+                
+    //                 // std_msgs::Float64 tmp_dis ;
+    //                 // tmp_dis.data = m_output.x[0];
+    //                 // dis_pub.publish(tmp_dis);
+    //                 // tmp_dis.data = m_output.x[1];
+    //                 // y_pub.publish(tmp_dis);
+    //                 // tmp_dis.data = m_output.x[2];
+    //                 // yaw_pub.publish(tmp_dis);
+    //         }
+            
+    // }
+
 
     
-
+#if 1
     // ros::Rate r(100);
     //这个需要满足turtlebot的时间频率
     while(n.ok())
     {
         // r.sleep();
-        if(!m_get_laser || !has_robot_pose)
+        if(!m_get_laser || !m_has_robot_pose)
         {
             std::cout <<" No laser or no Pose, please check laser and localization!!!" << std::endl;
-            geometry_msgs::Twist vel;
-            vel.linear.y= 0;
-            vel.linear.z= 0;
-            vel.linear.x= 0;
-            
-            vel.angular.x= 0;
-            vel.angular.y= 0;
-            vel.angular.z= 0;
-
-            m_vel_pub.publish(vel);
-            m_vel_pub.publish(vel);
-            m_vel_pub.publish(vel);
+            pubZeroVel();
             m_charge_server->setAborted();
             return;
         }
-        if(cnt_flag == 0)
+
+        m_mtx.lock();
+        sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
+        m_mtx.unlock();
+ 
+
+        double w = 0;
+        double x = 0;
+        double y = 0;
+        double theda = 0;
+        if(icpGetRelativePose(scan_copy,goal_scan))
         {
-            m_mtx.lock();
-            sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
-            m_mtx.unlock();
-            if(icpGetRelativePose(scan_copy,goal_scan))
-            {
+            std::cout << "----------------use icp-------------------" << std::endl;
+            std::cout << m_output.x[0] << "  " << m_output.x[1] << "  " << m_output.x[2]<< std::endl;
+            std::cout << m_output.error/m_output.nvalid << " " << m_output.nvalid << std::endl;
 
-                out_error = m_output.x[1];
-                angle_exp = kp_out * out_error;
+            x = m_output.x[0];
+            y = m_output.x[1];
+            theda = m_output.x[2];
 
-                if(angle_exp > max_angle )
-                {
-                    angle_exp = max_angle;
-                }
-                else if(angle_exp < (-1.0 * max_angle))
-                {
-                    angle_exp = (-1.0 * max_angle);
-                }    
-            }
-            else
-            {
-                // std::cout << "error no  icp,use amcl pose|| " 
-                //     << m_output.valid << "  "<< m_output.error/m_output.nvalid << std::endl;
-            
-                m_mtx_pose.lock();
-                geometry_msgs::PoseStamped pose_cur = m_current_pose;
-                m_mtx_pose.unlock();
-                double yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
-                double offset_yaw = yaw_cur - ba;
-                offset_yaw = normalize(offset_yaw);
-
-                double m_x = pose_cur.pose.position.x - bx;
-                double m_y = pose_cur.pose.position.y - by;
-                // to goal cordinatory
-                double offset_x = m_x * cos(ba) + m_y * sin(ba);
-                double offset_y = m_y * cos(ba) - m_x * sin(ba);
-
-        
-               
-                out_error = offset_y;
-                angle_exp = kp_out * out_error;
-
-                if(angle_exp > max_angle )
-                {
-                    angle_exp = max_angle;
-                }
-                else if(angle_exp < (-1.0 * max_angle))
-                {
-                    angle_exp = (-1.0 * max_angle);
-                }
-              
-            }
-
-            std::cout << "================================================================" << angle_exp << "   :   " << out_error << std::endl;
-            
-            in_error = 0;
-            in_error_pre = 0;
-            cnt_flag ++;
-            
+ 
 
         }
         else
         {
+            std::cout << "----------------use odom-------------------" << std::endl;
+            std::cout << m_output.x[0] << "  " << m_output.x[1] << "  " << m_output.x[2]<< std::endl;
+            std::cout << m_output.error/m_output.nvalid << " " << m_output.nvalid << std::endl;
+
+            m_mtx_pose.lock();
+            geometry_msgs::PoseStamped pose_cur = m_current_pose;
+            m_mtx_pose.unlock();
+            double yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
+            double offset_yaw = yaw_cur - ba;
+            offset_yaw = normalize(offset_yaw);
+
+            double m_x = pose_cur.pose.position.x - bx;
+            double m_y = pose_cur.pose.position.y - by;
+            
+            double offset_x = m_x * cos(ba) + m_y * sin(ba);
+            double offset_y = m_y * cos(ba) - m_x * sin(ba); 
+
+
+            x       = offset_x;
+            y       = offset_y;
+            theda   = offset_yaw;
+          
+        }
+        if(flag_init)
+        {
+            flag_init = false;
+            error_x   = x;
+            error_y   = y;
+            error_yaw = theda;
+
+        }
+
+        e_dis = y;
+        e_yaw = 0 - theda;
+        w = m_kp_dis * e_dis + m_kd_dis * (e_dis - e_dis_pre) + m_ki_dis * e_dis_add + m_kp_yaw * e_yaw ;
+        if(fabs(y) < 0.01 && x < 0.5)
+        {
+            std::cout << "********************************************************" << std::endl;
+            std::cout << m_kp_dis * e_dis << "   " << m_kd_dis * (e_dis - e_dis_pre) << "   "<< m_ki_dis * e_dis_add  << std::endl;
+            std::cout << m_kp_yaw * e_yaw  << "   " <<  m_kd_yaw * (e_yaw - e_yaw_pre) << "   "<< m_ki_yaw * e_yaw_add << std::endl;
+            std::cout << "********************************************************" << std::endl;
+
+            e_dis_add += e_dis;
+            e_yaw_add += e_yaw;
+
+            w = m_kp_dis * e_dis + m_kd_dis * (e_dis - e_dis_pre) + m_ki_dis * e_dis_add + m_kp_yaw * e_yaw + m_kd_yaw * (e_yaw - e_yaw_pre) + m_ki_yaw * e_yaw_add;
+           
+
+
+
+        }
+        e_yaw_pre = e_yaw;
+
+        e_dis_pre = e_dis;
+
+
+
+        if(w > w_max)
+        {
+            w = w_max;
+        }
+        else if(w < -w_max)
+        {
+            w = -w_max;
+        }
+
+        std_msgs::Float64 tmp_dis ;
+        tmp_dis.data = y;
+        dis_pub.publish(tmp_dis);
+
+       
+        tmp_dis.data = theda;
+        y_pub.publish(tmp_dis);
+
+
+
+        if(x < STOP_DIS )
+        {
+            pubZeroVel();
             m_mtx.lock();
             sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
             m_mtx.unlock();
-            double x = 0;
-            double y = 0;
-            double zz = 0;
-            if(icpGetRelativePose(scan_copy,goal_scan))
-            {
-                in_error = angle_exp - m_output.x[2];
-                x = m_output.x[0];
-                y = m_output.x[1];
-                zz = m_output.x[2];
-            }
-            else
-            {
-                
-                // std::cout << "error no  icp,use amcl pose|| " 
-                //     << m_output.valid << "  "<< m_output.error/m_output.nvalid << std::endl;
+            icpGetRelativePose(scan_copy,goal_scan);
+            std::cout << " end:  "<< m_output.valid << "  "<< m_output.x[0] << "  "<< m_output.x[1] << "  "<< m_output.x[2]  << std::endl;
+            std::cout << " init error:  "<< error_x << "  "<< error_y << "  "<< error_yaw << std::endl;
             
-                m_mtx_pose.lock();
-                geometry_msgs::PoseStamped pose_cur = m_current_pose;
-                m_mtx_pose.unlock();
-                double yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
-                double offset_yaw = yaw_cur - ba;
-                offset_yaw = normalize(offset_yaw);
-
-                double m_x = pose_cur.pose.position.x - bx;
-                double m_y = pose_cur.pose.position.y - by;
-                // to goal cordinatory
-                double offset_x = m_x * cos(ba) + m_y * sin(ba);
-                double offset_y = m_y * cos(ba) - m_x * sin(ba); 
-                x = offset_x;
-                y = offset_y;
-                zz = offset_yaw;
-
-                in_error = angle_exp - offset_yaw;
-
-
-            }
-            
-
-
-            double z = in_error * kp_in + (in_error - in_error_pre) * kd_in;
-
-            
-
-            if(z > w_max)
-            {
-              z = w_max;
-            }
-            else if(z < -w_max)
-            {
-              z = -w_max;
-            }
-
-            std::cout << "yaw : "<< zz << "  in_error : " << in_error << " z :  " << z << " y: "<< y << std::endl;
-
-            geometry_msgs::Twist vel;
-            vel.linear.y = 0;
-            vel.linear.z = 0;
-            vel.linear.x = -0.15;
-            vel.angular.x = 0;
-            vel.angular.y = 0;
-            vel.angular.z = 0;
-
-            if(x < STOP_DIS )
-            {
-              vel.linear.x = 0;
-              m_vel_pub.publish(vel);
-            
-              break;
-            }
-
-            if(x < 0.4)
-            {
-              vel.linear.x = -0.1;
-            }
-            vel.angular.z = z;
-            m_vel_pub.publish(vel);
- 
-            in_error_pre = in_error;
-            cnt_flag ++;
-            cnt_flag = cnt_flag % cnt_max;
-
-            
+            std::cout << "arrival in dock station" << std::endl;
+            m_charge_server->setSucceeded();    
+            return;
         }
+
+        geometry_msgs::Twist vel;
+        vel.linear.y = 0;
+        vel.linear.z = 0;
+        vel.linear.x = -0.1;
+        vel.angular.x = 0;
+        vel.angular.y = 0;
+        vel.angular.z = w;
+        if(x < 0.1)
+        {
+            vel.linear.x = -0.05;
+
+        }
+        m_vel_pub.publish(vel);
+    
     }
+
+#endif
+ 
+}
+
+
+void dock_server::pubZeroVel()
+{
     geometry_msgs::Twist vel;
     vel.linear.y= 0;
     vel.linear.z= 0;
@@ -480,20 +492,10 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     vel.angular.x= 0;
     vel.angular.y= 0;
     vel.angular.z= 0;
-
+ 
     m_vel_pub.publish(vel);
     m_vel_pub.publish(vel);
     m_vel_pub.publish(vel);
-
-    m_mtx.lock();
-    sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
-    m_mtx.unlock();
-    icpGetRelativePose(scan_copy,goal_scan);
-    std::cout << " end:  "<< m_output.x[0] << "  "<< m_output.x[1] << "  "<< m_output.x[2]  << std::endl;
-
-
-    std::cout << "arrival in dock station" << std::endl;
-    m_charge_server->setSucceeded();
 }
 
 
@@ -519,12 +521,12 @@ void dock_server::initIcpParams()
     m_output.cov_x_m = 0;
     m_output.dx_dy1_m = 0;
     m_output.dx_dy2_m = 0;
-    m_input.max_angular_correction_deg = 70.0;
-    m_input.max_linear_correction = 0.7;
-    m_input.max_correspondence_dist = 10;
+    m_input.max_angular_correction_deg = 45.0;
+    m_input.max_linear_correction = 0.5;
+    m_input.max_correspondence_dist = 1.0;
     m_input.max_iterations = 40;
-    m_input.epsilon_xy = 0.0001;
-    m_input.epsilon_theta = 0.0001;
+    m_input.epsilon_xy = 0.000001;
+    m_input.epsilon_theta = 0.000001;
     m_input.sigma = 0.010;
     m_input.use_corr_tricks = 1;
     m_input.restart = 0;
@@ -536,7 +538,7 @@ void dock_server::initIcpParams()
     m_input.use_point_to_line_distance = 1;
     m_input.do_alpha_test = 0;
     m_input.do_alpha_test_thresholdDeg = 20.0; 
-    m_input.outliers_maxPerc = 0.90;
+    m_input.outliers_maxPerc = 0.75;
     m_input.outliers_adaptive_order = 0.7;
     m_input.outliers_adaptive_mult = 2.0;
     m_input.do_visibility_test = 0; 

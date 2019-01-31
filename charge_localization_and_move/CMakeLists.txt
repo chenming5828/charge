@@ -75,11 +75,11 @@ target_link_libraries(showodom
 )
 
 
-add_executable(showekf src/showekf.cpp  )
-target_link_libraries(showekf
-    ${Boost_LIBRARIES}
-    ${catkin_LIBRARIES}
-)
+# add_executable(showekf src/showekf.cpp  )
+# target_link_libraries(showekf
+#     ${Boost_LIBRARIES}
+#     ${catkin_LIBRARIES}
+# )
 
 add_executable(showlaser src/showlaser.cpp  )
 target_link_libraries(showlaser
