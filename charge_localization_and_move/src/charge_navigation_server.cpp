@@ -259,18 +259,18 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     pre_goal.target_pose.pose.orientation = tf::createQuaternionMsgFromYaw(pre_a);
 
     // tell move base to go to pre dock station
-    m_move_base_client->sendGoal(pre_goal);
+    // m_move_base_client->sendGoal(pre_goal);
     
-    std::cout << "go to pre dock" << std::endl;
-    m_move_base_client->waitForResult();
+    // std::cout << "go to pre dock" << std::endl;
+    // m_move_base_client->waitForResult();
     
 
-    if(m_move_base_client->getState() != actionlib::SimpleClientGoalState::SUCCEEDED)
-    {
-        std::cout << "move base error " << std::endl;
-        m_charge_server->setAborted();
-        return ;
-    }
+    // if(m_move_base_client->getState() != actionlib::SimpleClientGoalState::SUCCEEDED)
+    // {
+    //     std::cout << "move base error " << std::endl;
+    //     m_charge_server->setAborted();
+    //     return ;
+    // }
 
     std::cout << "arrival in  pre dock" << std::endl;
   
@@ -292,47 +292,47 @@ void dock_server::executeCb(const charge_localization_and_move::chargeGoalConstP
     bool flag_init = true;
     ros::NodeHandle n;
 
-     
-    // while(n.ok())
-    // {
+ #if 1    
+    while(n.ok())
+    {
 
 
-    //         m_mtx.lock();
-    //         sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
-    //         m_mtx.unlock();
-    //         if(icpGetRelativePose(scan_copy,goal_scan))
-    //         {
-    //             std::cout <<  "********|||||---- : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
-    //                         << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
+            m_mtx.lock();
+            sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
+            m_mtx.unlock();
+            if(icpGetRelativePose(scan_copy,goal_scan))
+            {
+                std::cout <<  "********|||||---- : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
+                            << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
 
-    //                 std_msgs::Float64 tmp_dis ;
-    //                 tmp_dis.data = m_output.x[0];
-    //                 dis_pub.publish(tmp_dis);
-    //                 tmp_dis.data = m_output.x[1];
-    //                 y_pub.publish(tmp_dis);
-    //                 tmp_dis.data = m_output.x[2];
-    //                 yaw_pub.publish(tmp_dis);
-    //         }
-    //         else
-    //         {
-    //             std::cout <<" ==================error============" << std::endl;
-    //             std::cout <<  "result : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
-    //                         << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
+                    std_msgs::Float64 tmp_dis ;
+                    tmp_dis.data = m_output.x[0];
+                    dis_pub.publish(tmp_dis);
+                    tmp_dis.data = m_output.x[1];
+                    y_pub.publish(tmp_dis);
+                    tmp_dis.data = m_output.x[2];
+                    yaw_pub.publish(tmp_dis);
+            }
+            else
+            {
+                std::cout <<" ==================error============" << std::endl;
+                std::cout <<  "result : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
+                            << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
                 
-    //                 // std_msgs::Float64 tmp_dis ;
-    //                 // tmp_dis.data = m_output.x[0];
-    //                 // dis_pub.publish(tmp_dis);
-    //                 // tmp_dis.data = m_output.x[1];
-    //                 // y_pub.publish(tmp_dis);
-    //                 // tmp_dis.data = m_output.x[2];
-    //                 // yaw_pub.publish(tmp_dis);
-    //         }
+                    // std_msgs::Float64 tmp_dis ;
+                    // tmp_dis.data = m_output.x[0];
+                    // dis_pub.publish(tmp_dis);
+                    // tmp_dis.data = m_output.x[1];
+                    // y_pub.publish(tmp_dis);
+                    // tmp_dis.data = m_output.x[2];
+                    // yaw_pub.publish(tmp_dis);
+            }
             
-    // }
+    }
 
 
-    
-#if 1
+ #else   
+
     // ros::Rate r(100);
     //这个需要满足turtlebot的时间频率
     while(n.ok())
