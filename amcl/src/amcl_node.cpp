@@ -153,6 +153,11 @@ class AmclNode
     int process();
     void savePoseToServer();
 
+	double getPoseConfidence()
+	{
+		return confidence_;
+	};
+
   private:
     std::shared_ptr<tf2_ros::TransformBroadcaster> tfb_;
     std::shared_ptr<tf2_ros::TransformListener> tfl_;
@@ -317,6 +322,8 @@ class AmclNode
    sensor_msgs::LaserScan  lastest_scan_;
    void icpCalcInitPose(double map_x, double map_y, double map_yaw,const sensor_msgs::LaserScanConstPtr& laser_scan);
 
+   double confidence_;
+
 
    
 
@@ -382,7 +389,8 @@ AmclNode::AmclNode() :
         initial_pose_hyp_(NULL),
         first_map_received_(false),
         first_reconfigure_call_(true),
-        get_laser_(false)
+        get_laser_(false),
+		confidence_(0.0)
 {
   boost::recursive_mutex::scoped_lock l(configuration_mutex_);
 
@@ -1585,6 +1593,7 @@ for (int i = 0; i < n; i += 3)
 
 std::sort (pz_vec.begin(), pz_vec.end()); 
 int ss = pz_vec.size();
+confidence_ = pz_vec[ss/2];
 std::cout << "pose zhixin :: ============"  << pz_vec[ss/2] << std::endl;
 
 
