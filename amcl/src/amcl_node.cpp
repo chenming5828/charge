@@ -1521,6 +1521,77 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       pose_pub_.publish(p);
       last_published_pose = p;
 
+double yaw =  tf2::getYaw(p.pose.pose.orientation);
+double ox  =  p.pose.pose.position.x;
+double oy  =  p.pose.pose.position.y;
+
+double laser_x,laser_y,laser_yaw;
+baseToLaser(ox, oy, yaw, laser_x, laser_y, laser_yaw);
+
+unsigned int n = laser_scan->ranges.size();
+double obs_range, obs_bearing;
+double pz;
+double z;
+double z_rand_mult = 1.0/laser_scan->range_max;
+double z_hit_denom = 2 * 0.2 * 0.2;
+std::vector<double> pz_vec;
+// std::cout << "----------------------------------------------------------"  << pz << std::endl;
+
+for (int i = 0; i < n; i += 3)
+{
+	obs_range = laser_scan->ranges[i];
+	obs_bearing = laser_scan->angle_min + i * laser_scan->angle_increment;
+
+	// This model ignores max range readings
+	if(obs_range >= laser_scan->range_max)
+	continue;
+
+	// Check for NaN
+	if(obs_range != obs_range)
+	continue;
+
+	pz = 0.0;
+
+	// Compute the endpoint of the beam
+	double hit_x = laser_x + obs_range * cos(laser_yaw + obs_bearing);
+	double hit_y = laser_y + obs_range * sin(laser_yaw + obs_bearing);
+
+	// Convert to map grid coords.
+	int mi, mj;
+	mi = MAP_GXWX(map_, hit_x);
+	mj = MAP_GYWY(map_, hit_y);
+	
+	// Part 1: Get distance from the hit to closest obstacle.
+	// Off-map penalized as max distance
+	if(!MAP_VALID(map_, mi, mj))
+	z = map_->max_occ_dist;
+	else
+	z = map_->cells[MAP_INDEX(map_,mi,mj)].occ_dist;
+
+	pz += 0.94 * exp(-(z * z) / z_hit_denom);
+	
+
+	
+	pz += 0.06 * z_rand_mult;
+
+	
+	assert(pz <= 1.0);
+	assert(pz >= 0.0);
+	pz_vec.push_back(pz);
+
+	// std::cout << "one beam pz :: ============"  << pz << std::endl;
+
+}
+
+std::sort (pz_vec.begin(), pz_vec.end()); 
+int ss = pz_vec.size();
+std::cout << "pose zhixin :: ============"  << pz_vec[ss/2] << std::endl;
+
+
+
+
+
+
  
 
 
