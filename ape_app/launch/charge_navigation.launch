@@ -1,0 +1,43 @@
+<launch>
+
+  <include file="$(find ape_app)/launch/bringup_turtlebot.launch"/>
+  <include file="$(find ape_app)/launch/load_map.launch"/>
+  <include file="$(find ape_app)/launch/amcl.launch"/>
+
+
+  <arg name="odom_frame_id"   default="odom"/>
+  <arg name="base_frame_id"   default="base_footprint"/>
+  <arg name="global_frame_id" default="map"/>
+  <arg name="turtlebot_cmd_vel" default="mobile_base/commands/velocity"/>
+  <arg name="laser_topic" default="scan" />
+
+  
+
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <rosparam file="$(find ape_app)/config/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find ape_app)/config/costmap_common_params.yaml" command="load" ns="local_costmap" />
+ 
+    <rosparam file="$(find ape_app)/config/local_costmap_params.yaml" command="load" />   
+    <rosparam file="$(find ape_app)/config/global_costmap_params.yaml" command="load" />
+    <rosparam file="$(find ape_app)/config/dwa_local_planner_params.yaml" command="load" />
+    <rosparam file="$(find ape_app)/config/move_base_params.yaml" command="load" />
+    <rosparam file="$(find ape_app)/config/global_planner_params.yaml" command="load" />
+    <rosparam file="$(find ape_app)/config/navfn_global_planner_params.yaml" command="load" />
+
+    
+    <param name="global_costmap/global_frame" value="$(arg global_frame_id)"/>
+    <param name="global_costmap/robot_base_frame" value="$(arg base_frame_id)"/>
+    <param name="local_costmap/global_frame" value="$(arg odom_frame_id)"/>
+    <param name="local_costmap/robot_base_frame" value="$(arg base_frame_id)"/>
+    <param name="DWAPlannerROS/global_frame_id" value="$(arg odom_frame_id)"/>
+    <remap from="scan" to="$(arg laser_topic)"/>
+    <remap from="cmd_vel" to="$(arg turtlebot_cmd_vel)"/>
+  </node>
+  
+ 
+ 
+
+
+
+
+</launch>

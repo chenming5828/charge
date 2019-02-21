@@ -1,0 +1,20 @@
+<?xml version="1.0.0" ?>
+
+<launch>
+  <include file="$(find turtlebot_bringup)/launch/minimal.launch" />
+  <include file="$(find turtlebot_teleop)/launch/myjoystick.launch" />
+ 
+
+  <arg name="laser_x_to_base"           default="-0.13"/>
+  <arg name="laser_y_to_base"           default="0.0"/>
+  <arg name="laser_z_to_base"           default="0.28"/>
+  <arg name="laser_roll_to_base"        default="0.0"/>
+  <arg name="laser_pitch_to_base"       default="0.0"/>
+  <arg name="laser_yaw_to_base"         default="0.0"/>
+
+
+  <node pkg="tf" type="static_transform_publisher" name="base_to_laser" 
+        args="laser_x_to_base laser_y_to_base laser_z_to_base laser_roll_to_base 
+        laser_pitch_to_base laser_yaw_to_base base_link laser 100"/>   
+ 
+</launch>
