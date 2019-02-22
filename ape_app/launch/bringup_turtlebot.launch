@@ -14,7 +14,7 @@
 
 
   <node pkg="tf" type="static_transform_publisher" name="base_to_laser" 
-        args="laser_x_to_base laser_y_to_base laser_z_to_base laser_roll_to_base 
-        laser_pitch_to_base laser_yaw_to_base base_link laser 100"/>   
+        args="$(arg laser_x_to_base) $(arg laser_y_to_base) $(arg laser_z_to_base) $(arg laser_roll_to_base) 
+        $(arg laser_pitch_to_base) $(arg laser_yaw_to_base) base_link laser 100"/>   
  
 </launch>
