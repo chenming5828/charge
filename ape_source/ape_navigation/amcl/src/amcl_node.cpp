@@ -324,6 +324,8 @@ class AmclNode
 
    double confidence_;
 
+   int cnt_laser_;
+
 
    
 
@@ -390,7 +392,8 @@ AmclNode::AmclNode() :
         first_map_received_(false),
         first_reconfigure_call_(true),
         get_laser_(false),
-		confidence_(0.0)
+        cnt_laser_(0),
+		    confidence_(0.0)
 {
   boost::recursive_mutex::scoped_lock l(configuration_mutex_);
 
@@ -1292,7 +1295,18 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     bool update = fabs(delta.v[0]) > d_thresh_ ||
                   fabs(delta.v[1]) > d_thresh_ ||
                   fabs(delta.v[2]) > a_thresh_;
-    update = update || m_force_update;
+    cnt_laser_++;
+    if(cnt_laser_ < 20)
+    {
+        update = true;
+
+    }
+    else
+    {
+        update = update || m_force_update;
+    }
+    
+    
     m_force_update=false;
 
     // Set the laser update flags
@@ -1898,7 +1912,7 @@ AmclNode::handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStampe
 
   }
   }
-
+  cnt_laser_ = 0;
   delete initial_pose_hyp_;
   initial_pose_hyp_ = new amcl_hyp_t();
   initial_pose_hyp_->pf_pose_mean = pf_init_pose_mean;
