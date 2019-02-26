@@ -293,42 +293,7 @@ void dock_server::executeCb(const ape_actions::ApeChargeGoalConstPtr& goal)
     ros::NodeHandle n;
 
      
-    // while(n.ok())
-    // {
 
-
-    //         m_mtx.lock();
-    //         sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
-    //         m_mtx.unlock();
-    //         if(icpGetRelativePose(scan_copy,goal_scan))
-    //         {
-    //             std::cout <<  "********|||||---- : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
-    //                         << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
-
-    //                 std_msgs::Float64 tmp_dis ;
-    //                 tmp_dis.data = m_output.x[0];
-    //                 dis_pub.publish(tmp_dis);
-    //                 tmp_dis.data = m_output.x[1];
-    //                 y_pub.publish(tmp_dis);
-    //                 tmp_dis.data = m_output.x[2];
-    //                 yaw_pub.publish(tmp_dis);
-    //         }
-    //         else
-    //         {
-    //             std::cout <<" ==================error============" << std::endl;
-    //             std::cout <<  "result : "<<  m_output.valid << " : "<< m_output.error/m_output.nvalid 
-    //                         << " : "<< m_output.error<< " : "<< m_output.nvalid  << std::endl;
-                
-    //                 // std_msgs::Float64 tmp_dis ;
-    //                 // tmp_dis.data = m_output.x[0];
-    //                 // dis_pub.publish(tmp_dis);
-    //                 // tmp_dis.data = m_output.x[1];
-    //                 // y_pub.publish(tmp_dis);
-    //                 // tmp_dis.data = m_output.x[2];
-    //                 // yaw_pub.publish(tmp_dis);
-    //         }
-            
-    // }
 
 
     
@@ -349,6 +314,25 @@ void dock_server::executeCb(const ape_actions::ApeChargeGoalConstPtr& goal)
         m_mtx.lock();
         sensor_msgs::LaserScan scan_copy = m_lastest_scan ;
         m_mtx.unlock();
+
+
+        // set first guess 
+        m_mtx_pose.lock();
+        geometry_msgs::PoseStamped pose_cur = m_current_pose;
+        m_mtx_pose.unlock();
+        double yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
+        double offset_yaw = yaw_cur - ba;
+        offset_yaw = normalize(offset_yaw);
+
+        double m_x = pose_cur.pose.position.x - bx;
+        double m_y = pose_cur.pose.position.y - by;
+        
+        double offset_x = m_x * cos(ba) + m_y * sin(ba);
+        double offset_y = m_y * cos(ba) - m_x * sin(ba); 
+
+        m_input.first_guess[0] = offset_x;
+        m_input.first_guess[1] = offset_y;
+        m_input.first_guess[2] = offset_yaw;
  
 
         double w = 0;
@@ -377,15 +361,15 @@ void dock_server::executeCb(const ape_actions::ApeChargeGoalConstPtr& goal)
             m_mtx_pose.lock();
             geometry_msgs::PoseStamped pose_cur = m_current_pose;
             m_mtx_pose.unlock();
-            double yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
-            double offset_yaw = yaw_cur - ba;
+            yaw_cur  = tf2::getYaw(pose_cur.pose.orientation);
+            offset_yaw = yaw_cur - ba;
             offset_yaw = normalize(offset_yaw);
 
-            double m_x = pose_cur.pose.position.x - bx;
-            double m_y = pose_cur.pose.position.y - by;
+            m_x = pose_cur.pose.position.x - bx;
+            m_y = pose_cur.pose.position.y - by;
             
-            double offset_x = m_x * cos(ba) + m_y * sin(ba);
-            double offset_y = m_y * cos(ba) - m_x * sin(ba); 
+            offset_x = m_x * cos(ba) + m_y * sin(ba);
+            offset_y = m_y * cos(ba) - m_x * sin(ba); 
 
 
             x       = offset_x;
