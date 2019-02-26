@@ -33,6 +33,10 @@
     <remap from="scan" to="$(arg laser_topic)"/>
     <remap from="cmd_vel" to="$(arg turtlebot_cmd_vel)"/>
   </node>
+
+  <node pkg="ape_charge" type="odom2map" name="odom2map" output="screen" />
+  <node pkg="ape_charge" type="charge_navigation_server" name="charge_navigation_server" output="screen" />
+  <node pkg="ape_charge" type="charge_navigation_client" name="charge_navigation_client" output="screen" />
   
  
  
