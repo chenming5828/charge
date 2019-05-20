@@ -1,3 +1,10 @@
+建图：
+roslaunch ape_app slam.launch
+
+保存地图：
+rosrun map_server map_saver -f ~/map/fivefloor
+
+
 1.终端设置当前位置为充电桩
 rostopic pub set_charge std_msgs/Bool '{data: true }'
 
